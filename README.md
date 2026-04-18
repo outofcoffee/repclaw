@@ -1,0 +1,71 @@
+# repclaw
+
+[![CI](https://github.com/outofcoffee/repclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/outofcoffee/repclaw/actions/workflows/ci.yml)
+
+A terminal chat client for [OpenClaw](https://github.com/daggerhashimoto/openclaw-nerve). Pick an agent, start talking, see responses stream in live.
+
+![repclaw demo](docs/demo.gif)
+
+## What it does
+
+repclaw connects to your OpenClaw gateway over WebSocket and gives you a clean TUI for chatting with agents. It loads recent conversation history on startup so you have context, and streams responses as they arrive — no waiting for the full reply.
+
+That's it. No file browsers, no task boards, no dashboards. Just chat.
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/outofcoffee/repclaw/main/install/repclaw.sh | sh
+```
+
+Or, if you have Go 1.24+:
+
+```sh
+go install github.com/outofcoffee/repclaw@latest
+```
+
+Or build from source:
+
+```sh
+git clone https://github.com/outofcoffee/repclaw.git
+cd repclaw
+go build -o repclaw .
+```
+
+## Configuration
+
+Create a `.env` file (or set environment variables):
+
+```sh
+OPENCLAW_GATEWAY_URL=https://your-gateway-host
+OPENCLAW_GATEWAY_TOKEN=your-token-here
+```
+
+The gateway URL can use `https`, `http`, `wss`, or `ws` schemes. repclaw derives the WebSocket endpoint automatically.
+
+On first connection, the gateway may prompt you to approve device pairing. Accept the pairing request, then restart repclaw — subsequent connections will use the paired device identity.
+
+## Usage
+
+```sh
+repclaw
+```
+
+Select an agent from the list, then start chatting.
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Shift+Enter` | Insert newline |
+| `Esc` | Back to agent list |
+| `Ctrl+C` | Quit |
+
+## How it works
+
+repclaw uses the [openclaw-go](https://github.com/a3tai/openclaw-go) SDK to communicate with the gateway. The TUI is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), and [Lip Gloss](https://github.com/charmbracelet/lipgloss). Completed responses are rendered as markdown with [Glamour](https://github.com/charmbracelet/glamour).
+
+Device identity (Ed25519 keypair) is stored at `~/.openclaw-go/identity/` and shared with other openclaw-go clients.
+
+## License
+
+Apache 2.0

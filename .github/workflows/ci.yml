@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Checkout openclaw-go SDK
+        uses: actions/checkout@v6
+        with:
+          repository: a3tai/openclaw-go
+          path: openclaw-go
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Point go.mod replace at checked-out SDK
+        run: go mod edit -replace github.com/a3tai/openclaw-go=./openclaw-go
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: GoReleaser (dry run)
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: release --clean --snapshot --skip=publish
