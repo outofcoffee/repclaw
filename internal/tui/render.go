@@ -1,0 +1,161 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/olekukonko/tablewriter"
+)
+
+// renderMarkdown applies glamour markdown rendering to a completed message.
+func (m *chatModel) renderMarkdown(msg *chatMessage) {
+	if m.renderer != nil && msg.content != "" {
+		if rendered, err := m.renderer.Render(msg.content); err == nil {
+			msg.content = strings.TrimSpace(rendered)
+		}
+	}
+}
+
+func (m *chatModel) updateViewport() {
+	var b strings.Builder
+	contentWidth := m.width - 4
+
+	for i, msg := range m.messages {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		switch msg.role {
+		case "separator":
+			sep := strings.Repeat("─", contentWidth)
+			b.WriteString(statusStyle.Render(sep))
+			b.WriteString("\n")
+
+		case "user":
+			prefix := userPrefixStyle.Render("You: ")
+			b.WriteString(prefix)
+			b.WriteString(wordWrap(msg.content, contentWidth-6))
+			b.WriteString("\n")
+
+		case "assistant":
+			prefixLen := len(m.agentName) + 2
+			prefix := assistantPrefixStyle.Render(m.agentName + ": ")
+			b.WriteString(prefix)
+			wrapWidth := contentWidth - prefixLen
+			if msg.errMsg != "" {
+				b.WriteString(errorStyle.Render(wordWrap(msg.errMsg, wrapWidth)))
+			} else if msg.streaming {
+				b.WriteString(wordWrap(msg.content, wrapWidth))
+				b.WriteString(cursorStyle.Render("_"))
+			} else {
+				b.WriteString(wordWrap(msg.content, wrapWidth))
+			}
+			b.WriteString("\n")
+
+		case "system":
+			if msg.errMsg != "" {
+				b.WriteString(errorStyle.Render(msg.errMsg))
+			} else {
+				b.WriteString(statusStyle.Render(msg.content))
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	content := b.String()
+
+	// Pad the top so messages are anchored to the bottom of the viewport.
+	contentLines := strings.Count(content, "\n")
+	if contentLines < m.viewport.Height {
+		padding := strings.Repeat("\n", m.viewport.Height-contentLines)
+		content = padding + content
+	}
+
+	m.viewport.SetContent(content)
+	m.viewport.GotoBottom()
+}
+
+// formatStatsTable renders session stats as a formatted table.
+func (m *chatModel) formatStatsTable() string {
+	s := m.stats
+	var buf strings.Builder
+
+	allTokens := s.inputTokens + s.outputTokens + s.cacheRead + s.cacheWrite
+
+	t := tablewriter.NewWriter(&buf)
+	t.Header([]string{"", "Tokens", "Cost"})
+	t.Bulk([][]string{
+		{"Input", formatTokens(s.inputTokens), formatCost(s.inputCost)},
+		{"Output", formatTokens(s.outputTokens), formatCost(s.outputCost)},
+		{"Cache read", formatTokens(s.cacheRead), formatCost(s.cacheReadCost)},
+		{"Cache write", formatTokens(s.cacheWrite), formatCost(s.cacheWriteCost)},
+		{"Total", formatTokens(allTokens), formatCost(s.totalCost)},
+	})
+	t.Footer(nil)
+	t.Render()
+
+	buf.WriteString("\n")
+
+	t2 := tablewriter.NewWriter(&buf)
+	t2.Header([]string{"Messages", "Count"})
+	t2.Bulk([][]string{
+		{"User", fmt.Sprintf("%d", s.userMessages)},
+		{"Assistant", fmt.Sprintf("%d", s.assistantMessages)},
+		{"Total", fmt.Sprintf("%d", s.totalMessages)},
+	})
+	t2.Footer(nil)
+	t2.Render()
+
+	return buf.String()
+}
+
+// formatCost formats a dollar amount.
+func formatCost(c float64) string {
+	if c < 0.01 {
+		return fmt.Sprintf("$%.4f", c)
+	}
+	return fmt.Sprintf("$%.2f", c)
+}
+
+// formatTokens formats a token count with K/M suffixes.
+func formatTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// wordWrap wraps text to the given width, preserving existing newlines.
+func wordWrap(s string, width int) string {
+	if width <= 0 || len(s) <= width {
+		return s
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		if len(line) <= width {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(line)
+			continue
+		}
+		words := strings.Fields(line)
+		lineLen := 0
+		for i, w := range words {
+			if i > 0 && lineLen+1+len(w) > width {
+				b.WriteString("\n")
+				lineLen = 0
+			} else if i > 0 {
+				b.WriteString(" ")
+				lineLen++
+			}
+			b.WriteString(w)
+			lineLen += len(w)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
