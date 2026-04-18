@@ -11,9 +11,15 @@ import (
 	"github.com/outofcoffee/repclaw/internal/client"
 	"github.com/outofcoffee/repclaw/internal/config"
 	"github.com/outofcoffee/repclaw/internal/tui"
+	"github.com/outofcoffee/repclaw/internal/version"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("repclaw %s\n", version.Version)
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
