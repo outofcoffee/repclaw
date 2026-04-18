@@ -100,6 +100,7 @@ func newChatModel(c *client.Client, sessionKey, agentName string) chatModel {
 	ta.ShowLineNumbers = false
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter")
 	ta.KeyMap.DeleteWordBackward.SetKeys("alt+backspace", "ctrl+w")
+	ta.KeyMap.DeleteWordForward.SetKeys("alt+delete", "alt+d")
 
 	vp := viewport.New(0, 0)
 
@@ -518,7 +519,7 @@ func (m chatModel) View() string {
 		Width(m.width - 4).
 		Render(m.textarea.View())
 
-	help := helpStyle.Render(" enter: send | shift+enter: newline | esc: agents | ctrl+c: quit")
+	help := helpStyle.Render(" enter: send | shift+enter: newline | ctrl+w: delete word | esc: back | ctrl+c: quit")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
