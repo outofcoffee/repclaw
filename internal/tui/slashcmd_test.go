@@ -87,13 +87,13 @@ func TestSlashCommand_Help(t *testing.T) {
 	if cmd != nil {
 		t.Error("expected nil cmd from /help")
 	}
-	// Should have added a separator + help message.
-	if len(m.messages) != initialCount+2 {
-		t.Errorf("expected %d messages after /help, got %d", initialCount+2, len(m.messages))
+	// Should have added a help message.
+	if len(m.messages) != initialCount+1 {
+		t.Errorf("expected %d messages after /help, got %d", initialCount+1, len(m.messages))
 	}
 	lastMsg := m.messages[len(m.messages)-1]
-	if lastMsg.role != "assistant" {
-		t.Errorf("help message role = %q, want assistant", lastMsg.role)
+	if lastMsg.role != "system" {
+		t.Errorf("help message role = %q, want system", lastMsg.role)
 	}
 	if lastMsg.content == "" {
 		t.Error("help message content should not be empty")

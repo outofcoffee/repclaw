@@ -461,10 +461,7 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 		return true, nil
 	case "/help":
 		m.messages = append(m.messages, chatMessage{
-			role: "separator",
-		})
-		m.messages = append(m.messages, chatMessage{
-			role:    "assistant",
+			role:    "system",
 			content: "/quit, /exit — quit repclaw\n/back — return to agent list\n/clear — clear chat display\n/help — show this help",
 		})
 		m.updateViewport()
@@ -474,7 +471,7 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 	// Unknown slash command.
 	if strings.HasPrefix(text, "/") {
 		m.messages = append(m.messages, chatMessage{
-			role:   "assistant",
+			role:   "system",
 			errMsg: fmt.Sprintf("unknown command: %s (try /help)", command),
 		})
 		m.updateViewport()
@@ -528,12 +525,20 @@ func (m *chatModel) updateViewport() {
 			b.WriteString(prefix)
 			wrapWidth := contentWidth - prefixLen
 			if msg.errMsg != "" {
-				b.WriteString(wordWrap(msg.errMsg, wrapWidth))
+				b.WriteString(errorStyle.Render(wordWrap(msg.errMsg, wrapWidth)))
 			} else if msg.streaming {
 				b.WriteString(wordWrap(msg.content, wrapWidth))
 				b.WriteString(cursorStyle.Render("_"))
 			} else {
 				b.WriteString(wordWrap(msg.content, wrapWidth))
+			}
+			b.WriteString("\n")
+
+		case "system":
+			if msg.errMsg != "" {
+				b.WriteString(errorStyle.Render(wordWrap(msg.errMsg, contentWidth)))
+			} else {
+				b.WriteString(statusStyle.Render(wordWrap(msg.content, contentWidth)))
 			}
 			b.WriteString("\n")
 		}
