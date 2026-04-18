@@ -66,7 +66,7 @@ func (c *Client) Connect(ctx context.Context) error {
 			Mode:     protocol.ClientModeCLI,
 		}),
 		gateway.WithRole(protocol.RoleOperator),
-		gateway.WithScopes(protocol.ScopeOperatorRead, protocol.ScopeOperatorWrite),
+		gateway.WithScopes(protocol.ScopeOperatorRead, protocol.ScopeOperatorWrite, protocol.ScopeOperatorAdmin),
 		gateway.WithOnEvent(func(ev protocol.Event) {
 			select {
 			case c.events <- ev:
@@ -129,6 +129,19 @@ func (c *Client) SessionUsage(ctx context.Context, sessionKey string) (json.RawM
 	return c.gw.SessionsUsage(ctx, protocol.SessionsUsageParams{
 		Key:                  sessionKey,
 		IncludeContextWeight: &includeContext,
+	})
+}
+
+// ModelsList returns the available models.
+func (c *Client) ModelsList(ctx context.Context) (*protocol.ModelsListResult, error) {
+	return c.gw.ModelsList(ctx)
+}
+
+// SessionPatchModel changes the model for a session.
+func (c *Client) SessionPatchModel(ctx context.Context, sessionKey, modelID string) error {
+	return c.gw.SessionsPatch(ctx, protocol.SessionsPatchParams{
+		Key:   sessionKey,
+		Model: &modelID,
 	})
 }
 

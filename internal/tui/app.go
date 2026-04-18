@@ -75,7 +75,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if name == "" {
 					name = item.agent.ID
 				}
-				m.chatModel = newChatModel(m.client, item.sessionKey, name)
+				modelID := ""
+				if item.agent.Model != nil {
+					modelID = item.agent.Model.Primary
+				}
+				m.chatModel = newChatModel(m.client, item.sessionKey, name, modelID)
 				m.chatModel.setSize(m.width, m.height)
 				m.state = viewChat
 				return m, m.chatModel.Init()

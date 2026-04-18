@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewChatModel_DeleteWordBackwardBinding(t *testing.T) {
-	m := newChatModel(nil, "main", "test")
+	m := newChatModel(nil, "main", "test", "")
 
 	// ctrl+w should match DeleteWordBackward.
 	ctrlW := tea.KeyMsg(tea.Key{Type: tea.KeyCtrlW})
@@ -30,7 +30,7 @@ func TestNewChatModel_DeleteWordBackwardBinding(t *testing.T) {
 }
 
 func TestNewChatModel_InsertNewlineBinding(t *testing.T) {
-	m := newChatModel(nil, "main", "test")
+	m := newChatModel(nil, "main", "test", "")
 
 	// Plain enter should NOT match InsertNewline.
 	enter := tea.KeyMsg(tea.Key{Type: tea.KeyEnter})

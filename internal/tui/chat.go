@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/olekukonko/tablewriter"
 
 	"github.com/outofcoffee/repclaw/internal/client"
 )
@@ -37,7 +38,7 @@ func logEvent(format string, args ...any) {
 const inputHeight = 3
 
 // slashCommands is the list of available slash commands for autocomplete.
-var slashCommands = []string{"/back", "/clear", "/exit", "/help", "/quit"}
+var slashCommands = []string{"/back", "/clear", "/exit", "/help", "/model", "/quit", "/stats"}
 
 // chatMessage represents a single message in the conversation.
 type chatMessage struct {
@@ -49,10 +50,18 @@ type chatMessage struct {
 
 // sessionStats holds token usage stats for display.
 type sessionStats struct {
-	inputTokens int
+	inputTokens  int
 	outputTokens int
-	cacheRead   int
-	totalCost   float64
+	cacheRead    int
+	cacheWrite   int
+	totalCost    float64
+	inputCost    float64
+	outputCost   float64
+	cacheReadCost  float64
+	cacheWriteCost float64
+	totalMessages  int
+	userMessages   int
+	assistantMessages int
 }
 
 // chatModel is the chat view.
@@ -68,6 +77,7 @@ type chatModel struct {
 	height     int
 	renderer   *glamour.TermRenderer
 	stats      *sessionStats
+	modelID    string
 }
 
 const historyLimit = 20
@@ -109,7 +119,7 @@ type historyMessage struct {
 	Content []chatContentBlock `json:"content"`
 }
 
-func newChatModel(c *client.Client, sessionKey, agentName string) chatModel {
+func newChatModel(c *client.Client, sessionKey, agentName, modelID string) chatModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -134,6 +144,7 @@ func newChatModel(c *client.Client, sessionKey, agentName string) chatModel {
 		sessionKey: sessionKey,
 		agentName:  agentName,
 		renderer:   renderer,
+		modelID:    modelID,
 	}
 }
 
@@ -235,20 +246,40 @@ func (m chatModel) loadStats() tea.Cmd {
 		}
 		var resp struct {
 			Totals struct {
-				Input     int     `json:"input"`
-				Output    int     `json:"output"`
-				CacheRead int     `json:"cacheRead"`
-				TotalCost float64 `json:"totalCost"`
+				Input          int     `json:"input"`
+				Output         int     `json:"output"`
+				CacheRead      int     `json:"cacheRead"`
+				CacheWrite     int     `json:"cacheWrite"`
+				TotalCost      float64 `json:"totalCost"`
+				InputCost      float64 `json:"inputCost"`
+				OutputCost     float64 `json:"outputCost"`
+				CacheReadCost  float64 `json:"cacheReadCost"`
+				CacheWriteCost float64 `json:"cacheWriteCost"`
 			} `json:"totals"`
+			Aggregates struct {
+				Messages struct {
+					Total     int `json:"total"`
+					User      int `json:"user"`
+					Assistant int `json:"assistant"`
+				} `json:"messages"`
+			} `json:"aggregates"`
 		}
 		if err := json.Unmarshal(raw, &resp); err != nil {
 			return statsLoadedMsg{err: err}
 		}
 		return statsLoadedMsg{stats: &sessionStats{
-			inputTokens:  resp.Totals.Input,
-			outputTokens: resp.Totals.Output,
-			cacheRead:    resp.Totals.CacheRead,
-			totalCost:    resp.Totals.TotalCost,
+			inputTokens:      resp.Totals.Input,
+			outputTokens:     resp.Totals.Output,
+			cacheRead:        resp.Totals.CacheRead,
+			cacheWrite:       resp.Totals.CacheWrite,
+			totalCost:        resp.Totals.TotalCost,
+			inputCost:        resp.Totals.InputCost,
+			outputCost:       resp.Totals.OutputCost,
+			cacheReadCost:    resp.Totals.CacheReadCost,
+			cacheWriteCost:   resp.Totals.CacheWriteCost,
+			totalMessages:    resp.Aggregates.Messages.Total,
+			userMessages:     resp.Aggregates.Messages.User,
+			assistantMessages: resp.Aggregates.Messages.Assistant,
 		}}
 	}
 }
@@ -279,6 +310,35 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			m.messages = append(hist, m.messages...)
 			m.updateViewport()
 		}
+		return m, nil
+
+	case modelListMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{role: "system", errMsg: msg.err.Error()})
+		} else {
+			var lines []string
+			for _, mc := range msg.models {
+				lines = append(lines, fmt.Sprintf("  %s (%s)", mc.ID, mc.Provider))
+			}
+			m.messages = append(m.messages, chatMessage{
+				role:    "system",
+				content: "Available models:\n" + strings.Join(lines, "\n") + "\n\nUse /model <name> to switch",
+			})
+		}
+		m.updateViewport()
+		return m, nil
+
+	case modelSwitchedMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{role: "system", errMsg: msg.err.Error()})
+		} else {
+			m.modelID = msg.modelID
+			m.messages = append(m.messages, chatMessage{
+				role:    "system",
+				content: fmt.Sprintf("Switched to %s", msg.modelID),
+			})
+		}
+		m.updateViewport()
 		return m, nil
 
 	case statsLoadedMsg:
@@ -531,6 +591,65 @@ func slashCommandHint(input string) string {
 	return match[len(input):]
 }
 
+// modelListMsg is returned when the model list is fetched.
+type modelListMsg struct {
+	models []protocol.ModelChoice
+	err    error
+}
+
+// modelSwitchedMsg is returned after switching models.
+type modelSwitchedMsg struct {
+	modelID string
+	err     error
+}
+
+// handleModelCommand handles `/model` and `/model <name>`.
+func (m *chatModel) handleModelCommand(text string) (bool, tea.Cmd) {
+	parts := strings.SplitN(strings.TrimSpace(text), " ", 2)
+	if len(parts) == 1 {
+		// `/model` — list available models.
+		cl := m.client
+		return true, func() tea.Msg {
+			result, err := cl.ModelsList(context.Background())
+			if err != nil {
+				return modelListMsg{err: err}
+			}
+			return modelListMsg{models: result.Models}
+		}
+	}
+
+	// `/model <name>` — switch model.
+	query := strings.ToLower(strings.TrimSpace(parts[1]))
+	cl := m.client
+	sessionKey := m.sessionKey
+	return true, func() tea.Msg {
+		result, err := cl.ModelsList(context.Background())
+		if err != nil {
+			return modelSwitchedMsg{err: err}
+		}
+		// Find best match.
+		var match *protocol.ModelChoice
+		for i, mc := range result.Models {
+			lower := strings.ToLower(mc.ID)
+			if lower == query || strings.ToLower(mc.Name) == query {
+				match = &result.Models[i]
+				break
+			}
+			if strings.Contains(lower, query) || strings.Contains(strings.ToLower(mc.Name), query) {
+				match = &result.Models[i]
+				// Keep looking for an exact match.
+			}
+		}
+		if match == nil {
+			return modelSwitchedMsg{err: fmt.Errorf("no model matching %q", query)}
+		}
+		if err := cl.SessionPatchModel(context.Background(), sessionKey, match.ID); err != nil {
+			return modelSwitchedMsg{err: err}
+		}
+		return modelSwitchedMsg{modelID: match.ID}
+	}
+}
+
 // goBackMsg signals the AppModel to return to agent selection.
 type goBackMsg struct{}
 
@@ -551,10 +670,24 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 	case "/help":
 		m.messages = append(m.messages, chatMessage{
 			role:    "system",
-			content: "/quit, /exit — quit repclaw\n/back — return to agent list\n/clear — clear chat display\n/help — show this help",
+			content: "/quit, /exit — quit repclaw\n/back — return to agent list\n/clear — clear chat display\n/model — list available models\n/model <name> — switch model\n/stats — show session statistics\n/help — show this help",
 		})
 		m.updateViewport()
 		return true, nil
+	case "/stats":
+		if m.stats == nil {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "Stats not yet loaded..."})
+			m.updateViewport()
+			return true, m.loadStats()
+		}
+		m.messages = append(m.messages, chatMessage{role: "system", content: m.formatStatsTable()})
+		m.updateViewport()
+		return true, nil
+	}
+
+	// /model with optional argument.
+	if command == "/model" || strings.HasPrefix(command, "/model ") {
+		return m.handleModelCommand(text)
 	}
 
 	// Unknown slash command.
@@ -625,9 +758,9 @@ func (m *chatModel) updateViewport() {
 
 		case "system":
 			if msg.errMsg != "" {
-				b.WriteString(errorStyle.Render(wordWrap(msg.errMsg, contentWidth)))
+				b.WriteString(errorStyle.Render(msg.errMsg))
 			} else {
-				b.WriteString(statusStyle.Render(wordWrap(msg.content, contentWidth)))
+				b.WriteString(statusStyle.Render(msg.content))
 			}
 			b.WriteString("\n")
 		}
@@ -664,14 +797,28 @@ func (m *chatModel) setSize(w, h int) {
 }
 
 func (m chatModel) View() string {
-	title := fmt.Sprintf(" repclaw — %s", m.agentName)
+	// Build header: left side = app/agent/model, right side = stats.
+	left := fmt.Sprintf(" repclaw — %s", m.agentName)
+	if m.modelID != "" {
+		// Show short model name (strip provider prefix).
+		model := m.modelID
+		if i := strings.LastIndex(model, "/"); i >= 0 {
+			model = model[i+1:]
+		}
+		left += " · " + model
+	}
+	right := ""
 	if m.stats != nil {
 		newTokens := m.stats.inputTokens + m.stats.outputTokens
-		statsText := fmt.Sprintf("tokens: %s (%s cached)  cost: $%.2f ",
+		right = fmt.Sprintf("tokens: %s (%s cached)  $%.2f ",
 			formatTokens(newTokens), formatTokens(m.stats.cacheRead), m.stats.totalCost)
-		padding := m.width - len(title) - len(statsText)
+	}
+	// Only show right side if it fits.
+	title := left
+	if right != "" {
+		padding := m.width - len(left) - len(right)
 		if padding > 0 {
-			title += strings.Repeat(" ", padding) + statsText
+			title += strings.Repeat(" ", padding) + right
 		}
 	}
 	header := headerStyle.
@@ -698,6 +845,50 @@ func (m chatModel) View() string {
 		input,
 		help,
 	)
+}
+
+// formatStatsTable renders session stats as a formatted table.
+func (m *chatModel) formatStatsTable() string {
+	s := m.stats
+	var buf strings.Builder
+
+	allTokens := s.inputTokens + s.outputTokens + s.cacheRead + s.cacheWrite
+
+	// Token/cost table.
+	t := tablewriter.NewWriter(&buf)
+	t.Header([]string{"", "Tokens", "Cost"})
+	t.Bulk([][]string{
+		{"Input", formatTokens(s.inputTokens), formatCost(s.inputCost)},
+		{"Output", formatTokens(s.outputTokens), formatCost(s.outputCost)},
+		{"Cache read", formatTokens(s.cacheRead), formatCost(s.cacheReadCost)},
+		{"Cache write", formatTokens(s.cacheWrite), formatCost(s.cacheWriteCost)},
+		{"Total", formatTokens(allTokens), formatCost(s.totalCost)},
+	})
+	t.Footer(nil)
+	t.Render()
+
+	buf.WriteString("\n")
+
+	// Messages table.
+	t2 := tablewriter.NewWriter(&buf)
+	t2.Header([]string{"Messages", "Count"})
+	t2.Bulk([][]string{
+		{"User", fmt.Sprintf("%d", s.userMessages)},
+		{"Assistant", fmt.Sprintf("%d", s.assistantMessages)},
+		{"Total", fmt.Sprintf("%d", s.totalMessages)},
+	})
+	t2.Footer(nil)
+	t2.Render()
+
+	return buf.String()
+}
+
+// formatCost formats a dollar amount.
+func formatCost(c float64) string {
+	if c < 0.01 {
+		return fmt.Sprintf("$%.4f", c)
+	}
+	return fmt.Sprintf("$%.2f", c)
 }
 
 // formatTokens formats a token count with K/M suffixes.
