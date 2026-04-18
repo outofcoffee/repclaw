@@ -123,6 +123,18 @@ func (c *Client) ChatHistory(ctx context.Context, sessionKey string, limit int) 
 	})
 }
 
+// SessionUsage retrieves usage data for a session.
+func (c *Client) SessionUsage(ctx context.Context, sessionKey string) (json.RawMessage, error) {
+	includeContext := true
+	return c.gw.SessionsUsage(ctx, protocol.SessionsUsageParams{
+		Key:                  sessionKey,
+		IncludeContextWeight: &includeContext,
+	})
+}
+
+// GW returns the underlying gateway client (for direct RPC access).
+func (c *Client) GW() *gateway.Client { return c.gw }
+
 // Close closes the gateway connection.
 func (c *Client) Close() error {
 	if c.gw != nil {

@@ -47,6 +47,14 @@ type chatMessage struct {
 	errMsg    string
 }
 
+// sessionStats holds token usage stats for display.
+type sessionStats struct {
+	inputTokens int
+	outputTokens int
+	cacheRead   int
+	totalCost   float64
+}
+
 // chatModel is the chat view.
 type chatModel struct {
 	viewport   viewport.Model
@@ -59,6 +67,7 @@ type chatModel struct {
 	width      int
 	height     int
 	renderer   *glamour.TermRenderer
+	stats      *sessionStats
 }
 
 const historyLimit = 20
@@ -78,6 +87,12 @@ type historyRefreshMsg struct {
 // chatSentMsg is returned after a message is sent.
 type chatSentMsg struct {
 	err error
+}
+
+// statsLoadedMsg is returned when session usage stats are fetched.
+type statsLoadedMsg struct {
+	stats *sessionStats
+	err   error
 }
 
 // GatewayEventMsg wraps a gateway event for the bubbletea loop.
@@ -126,6 +141,7 @@ func (m chatModel) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
 		m.loadHistory(),
+		m.loadStats(),
 	)
 }
 
@@ -210,6 +226,33 @@ func (m chatModel) refreshHistory() tea.Cmd {
 	}
 }
 
+func (m chatModel) loadStats() tea.Cmd {
+	cl := m.client
+	return func() tea.Msg {
+		raw, err := cl.SessionUsage(context.Background(), "")
+		if err != nil {
+			return statsLoadedMsg{err: err}
+		}
+		var resp struct {
+			Totals struct {
+				Input     int     `json:"input"`
+				Output    int     `json:"output"`
+				CacheRead int     `json:"cacheRead"`
+				TotalCost float64 `json:"totalCost"`
+			} `json:"totals"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return statsLoadedMsg{err: err}
+		}
+		return statsLoadedMsg{stats: &sessionStats{
+			inputTokens:  resp.Totals.Input,
+			outputTokens: resp.Totals.Output,
+			cacheRead:    resp.Totals.CacheRead,
+			totalCost:    resp.Totals.TotalCost,
+		}}
+	}
+}
+
 // stripSystemLines removes "System:" prefixed lines and leading whitespace
 // from user messages, returning only the human-authored portion.
 func stripSystemLines(s string) string {
@@ -235,6 +278,12 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			hist := append(msg.messages, chatMessage{role: "separator"})
 			m.messages = append(hist, m.messages...)
 			m.updateViewport()
+		}
+		return m, nil
+
+	case statsLoadedMsg:
+		if msg.err == nil && msg.stats != nil {
+			m.stats = msg.stats
 		}
 		return m, nil
 
@@ -424,8 +473,8 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			logEvent("  FINALISED — refreshing history")
 		}
 		m.updateViewport()
-		// Reload history from server to get properly split messages.
-		return m.refreshHistory()
+		// Reload history and stats from server.
+		return tea.Batch(m.refreshHistory(), m.loadStats())
 
 	case "error":
 		logEvent("  ERROR: %s", chatEv.ErrorMessage)
@@ -615,9 +664,19 @@ func (m *chatModel) setSize(w, h int) {
 }
 
 func (m chatModel) View() string {
+	title := fmt.Sprintf(" repclaw — %s", m.agentName)
+	if m.stats != nil {
+		newTokens := m.stats.inputTokens + m.stats.outputTokens
+		statsText := fmt.Sprintf("tokens: %s (%s cached)  cost: $%.2f ",
+			formatTokens(newTokens), formatTokens(m.stats.cacheRead), m.stats.totalCost)
+		padding := m.width - len(title) - len(statsText)
+		if padding > 0 {
+			title += strings.Repeat(" ", padding) + statsText
+		}
+	}
 	header := headerStyle.
 		Width(m.width).
-		Render(fmt.Sprintf(" repclaw — %s", m.agentName))
+		Render(title)
 
 	input := inputBorderStyle.
 		Width(m.width - 4).
@@ -639,6 +698,18 @@ func (m chatModel) View() string {
 		input,
 		help,
 	)
+}
+
+// formatTokens formats a token count with K/M suffixes.
+func formatTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // wordWrap is a simple word wrapper.
