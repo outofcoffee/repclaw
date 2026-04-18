@@ -83,8 +83,24 @@ Select an agent from the list, then start chatting.
 |-----|--------|
 | `Enter` | Send message |
 | `Shift+Enter` | Insert newline |
+| `Ctrl+W` | Delete word |
+| `PgUp` / `PgDn` | Scroll chat history |
 | `Esc` | Back to agent list |
 | `Ctrl+C` | Quit |
+
+## Commands
+
+Type these in the chat input. Tab autocompletes partial commands.
+
+| Command | Action |
+|---------|--------|
+| `/help` | Show available commands |
+| `/model` | List available models |
+| `/model <name>` | Switch model (fuzzy match) |
+| `/stats` | Show token usage and cost breakdown |
+| `/clear` | Clear chat display |
+| `/back` | Return to agent list |
+| `/quit` | Quit repclaw |
 
 ## How it works
 
