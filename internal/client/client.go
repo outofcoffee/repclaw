@@ -146,10 +146,14 @@ func (c *Client) SessionPatchModel(ctx context.Context, sessionKey, modelID stri
 }
 
 // ExecRequest submits a command for execution on the gateway host.
+// TwoPhase is set so the gateway returns immediately with status "accepted"
+// and the decision arrives asynchronously via an exec.approval.resolved event.
 func (c *Client) ExecRequest(ctx context.Context, command, sessionKey string) (*protocol.ExecApprovalRequestResult, error) {
+	twoPhase := true
 	return c.gw.ExecApprovalRequest(ctx, protocol.ExecApprovalRequestParams{
 		Command:    command,
 		SessionKey: &sessionKey,
+		TwoPhase:   &twoPhase,
 	})
 }
 

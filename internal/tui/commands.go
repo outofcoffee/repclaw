@@ -137,6 +137,7 @@ func (m *chatModel) execCommand(command string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 
+		// Two-phase request: gateway returns immediately with status "accepted".
 		result, err := cl.ExecRequest(ctx, command, sessionKey)
 		if err != nil {
 			return execSubmittedMsg{err: err}
@@ -146,21 +147,29 @@ func (m *chatModel) execCommand(command string) tea.Cmd {
 		if result.Decision != nil {
 			decision = *result.Decision
 		}
-		logEvent("EXEC request id=%s status=%s decision=%q", result.ID, result.Status, decision)
+		logEvent("EXEC request id=%s status=%q decision=%q", result.ID, result.Status, decision)
 
-		switch decision {
-		case "deny":
+		if decision == "deny" {
 			return execSubmittedMsg{err: fmt.Errorf("command execution denied by gateway")}
-		case "":
-			_, err := cl.ExecResolve(ctx, result.ID, "approve")
-			if err != nil {
-				return execSubmittedMsg{err: fmt.Errorf("approval failed: %w", err)}
-			}
-			logEvent("EXEC auto-approved id=%s", result.ID)
-		default:
-			logEvent("EXEC decision=%q — waiting for exec.finished event", decision)
 		}
 
+		// Auto-approve: the user explicitly typed the command.
+		// The gateway may have already resolved the approval via its own exec policy,
+		// so ignore "unknown or expired" errors.
+		if decision == "" {
+			_, err = cl.ExecResolve(ctx, result.ID, "allow-once")
+			if err != nil {
+				// If the approval was already resolved, that's fine — just wait for exec.finished.
+				if !strings.Contains(err.Error(), "unknown or expired") {
+					return execSubmittedMsg{err: fmt.Errorf("approval failed: %w", err)}
+				}
+				logEvent("EXEC approval already resolved id=%s", result.ID)
+			} else {
+				logEvent("EXEC auto-approved id=%s", result.ID)
+			}
+		}
+
+		// Output arrives via exec.finished event through the event pump.
 		return execSubmittedMsg{}
 	}
 }

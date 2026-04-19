@@ -60,7 +60,12 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			logEvent("EXEC_FINISH parse error: %v", err)
 			return nil
 		}
-		logEvent("EXEC_FINISHED cmd=%s exit=%v output_len=%d", finished.Command, finished.ExitCode, len(finished.Output))
+		logEvent("EXEC_FINISHED session=%s cmd=%s exit=%v output_len=%d", finished.SessionKey, finished.Command, finished.ExitCode, len(finished.Output))
+		// Ignore exec results from other sessions.
+		if finished.SessionKey != "" && finished.SessionKey != m.sessionKey {
+			logEvent("  EXEC_FINISHED ignored (different session)")
+			return nil
+		}
 		m.sending = false
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
@@ -78,8 +83,38 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		m.updateViewport()
 		return nil
 
+	case "exec.approval.resolved":
+		var resolved protocol.ExecApprovalResolvedEvent
+		if err := json.Unmarshal(ev.Payload, &resolved); err != nil {
+			logEvent("EXEC_RESOLVED parse error: %v", err)
+			return nil
+		}
+		logEvent("EXEC_RESOLVED id=%s decision=%s", resolved.ID, resolved.Decision)
+		if resolved.Decision == "deny" {
+			m.sending = false
+			if len(m.messages) > 0 {
+				last := &m.messages[len(m.messages)-1]
+				if last.role == "system" && last.content == "running..." {
+					last.content = ""
+					last.errMsg = "command execution denied"
+				}
+			}
+			m.updateViewport()
+		}
+		// "allow-once" / "allow-always" → exec.finished will follow.
+		return nil
+
 	case protocol.EventExecDenied:
-		logEvent("EXEC_DENIED")
+		var denied protocol.ExecDenied
+		if err := json.Unmarshal(ev.Payload, &denied); err != nil {
+			logEvent("EXEC_DENIED parse error: %v", err)
+			return nil
+		}
+		logEvent("EXEC_DENIED session=%s reason=%s", denied.SessionKey, denied.Reason)
+		if denied.SessionKey != "" && denied.SessionKey != m.sessionKey {
+			logEvent("  EXEC_DENIED ignored (different session)")
+			return nil
+		}
 		m.sending = false
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
