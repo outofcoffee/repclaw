@@ -440,7 +440,7 @@ func (m chatModel) View() string {
 		if hint != "" {
 			help = helpStyle.Render(fmt.Sprintf(" %s%s — tab to complete", m.textarea.Value(), hint))
 		} else {
-			helpText := " enter: send | shift+enter: newline | ctrl+w: delete word | pgup/pgdn: scroll | /help: commands"
+			helpText := " enter: send | shift+enter: newline | /help: commands"
 			if n := len(m.pendingMessages); n > 0 {
 				helpText += fmt.Sprintf(" | %d queued", n)
 			}
