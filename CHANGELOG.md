@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.9.0] - 2026-04-19
+### Added
+- feat: add local agent skills support (agentskills.io spec)
+
+### Changed
+- docs: update roadmap
+- refactor: shorten help text
+
+### Fixed
+- fix: strip gateway-rewritten System prefixes and align message prefixes
+
 ## [0.8.1] - 2026-04-19
 ### Fixed
 - fix: preserve command execution messages after queue drain
