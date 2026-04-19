@@ -27,7 +27,8 @@ type chatModel struct {
 	client     *client.Client
 	sessionKey string
 	agentName  string
-	sending    bool
+	sending         bool
+	pendingMessages []string
 	width      int
 	height     int
 	renderer   *glamour.TermRenderer
@@ -187,18 +188,26 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			if m.sending {
-				return m, nil
-			}
 			text := strings.TrimSpace(m.textarea.Value())
 			if text == "" {
 				return m, nil
 			}
-			m.textarea.Reset()
 
+			// Slash commands are local — handle immediately even while sending.
 			if handled, cmd := m.handleSlashCommand(text); handled {
+				m.textarea.Reset()
 				return m, cmd
 			}
+
+			if m.sending {
+				// Queue the message for later delivery.
+				m.textarea.Reset()
+				m.pendingMessages = append(m.pendingMessages, text)
+				m.updateViewport()
+				return m, nil
+			}
+
+			m.textarea.Reset()
 
 			if strings.HasPrefix(text, "!") {
 				command := strings.TrimSpace(text[1:])
@@ -222,7 +231,6 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 
 	case execSubmittedMsg:
 		if msg.err != nil {
-			m.sending = false
 			if len(m.messages) > 0 {
 				last := &m.messages[len(m.messages)-1]
 				if last.role == "system" && last.content == "running..." {
@@ -231,6 +239,8 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 				}
 			}
 			m.updateViewport()
+			cmd := m.drainQueue()
+			return m, cmd
 		}
 		return m, nil
 
@@ -241,8 +251,9 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 				role:   "assistant",
 				errMsg: msg.err.Error(),
 			})
-			m.sending = false
 			m.updateViewport()
+			cmd := m.drainQueue()
+			return m, cmd
 		}
 		return m, nil
 
@@ -285,6 +296,36 @@ func (m *chatModel) sendMessage(text string) tea.Cmd {
 		_, err := m.client.ChatSend(context.Background(), sessionKey, text, idemKey)
 		return chatSentMsg{err: err}
 	}
+}
+
+// drainQueue sends the next queued message if any are pending.
+// It should be called whenever m.sending would be set to false.
+// Returns a tea.Cmd if a queued message was sent, nil otherwise.
+func (m *chatModel) drainQueue() tea.Cmd {
+	if len(m.pendingMessages) == 0 {
+		m.sending = false
+		// Queue fully drained — refresh history now that all messages have been sent.
+		return tea.Batch(m.refreshHistory(), m.loadStats())
+	}
+
+	text := m.pendingMessages[0]
+	m.pendingMessages = m.pendingMessages[1:]
+
+	if strings.HasPrefix(text, "!") {
+		command := strings.TrimSpace(text[1:])
+		if command == "" {
+			m.sending = false
+			return nil
+		}
+		m.messages = append(m.messages, chatMessage{role: "system", content: fmt.Sprintf("$ %s", command)})
+		m.messages = append(m.messages, chatMessage{role: "system", content: "running..."})
+		m.updateViewport()
+		return m.execCommand(command)
+	}
+
+	m.messages = append(m.messages, chatMessage{role: "user", content: text})
+	m.updateViewport()
+	return m.sendMessage(text)
 }
 
 func (m *chatModel) setSize(w, h int) {
@@ -360,7 +401,11 @@ func (m chatModel) View() string {
 		if hint != "" {
 			help = helpStyle.Render(fmt.Sprintf(" %s%s — tab to complete", m.textarea.Value(), hint))
 		} else {
-			help = helpStyle.Render(" enter: send | shift+enter: newline | ctrl+w: delete word | pgup/pgdn: scroll | /help: commands")
+			helpText := " enter: send | shift+enter: newline | ctrl+w: delete word | pgup/pgdn: scroll | /help: commands"
+			if n := len(m.pendingMessages); n > 0 {
+				helpText += fmt.Sprintf(" | %d queued", n)
+			}
+			help = helpStyle.Render(helpText)
 		}
 	}
 

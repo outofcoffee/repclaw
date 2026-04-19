@@ -55,6 +55,15 @@ func (m *chatModel) updateViewport() {
 		}
 	}
 
+	// Render queued messages that haven't been sent yet.
+	for _, text := range m.pendingMessages {
+		b.WriteString("\n")
+		prefix := userPrefixStyle.Render("You: ")
+		b.WriteString(prefix)
+		b.WriteString(wordWrap(text, contentWidth-6))
+		b.WriteString("\n")
+	}
+
 	content := b.String()
 
 	// Pad the top so messages are anchored to the bottom of the viewport.

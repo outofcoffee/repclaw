@@ -66,7 +66,6 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			logEvent("  EXEC_FINISHED ignored (different session)")
 			return nil
 		}
-		m.sending = false
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
 			if last.role == "system" && last.content == "running..." {
@@ -81,7 +80,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			}
 		}
 		m.updateViewport()
-		return nil
+		return m.drainQueue()
 
 	case "exec.approval.resolved":
 		var resolved protocol.ExecApprovalResolvedEvent
@@ -91,7 +90,6 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		}
 		logEvent("EXEC_RESOLVED id=%s decision=%s", resolved.ID, resolved.Decision)
 		if resolved.Decision == "deny" {
-			m.sending = false
 			if len(m.messages) > 0 {
 				last := &m.messages[len(m.messages)-1]
 				if last.role == "system" && last.content == "running..." {
@@ -100,6 +98,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				}
 			}
 			m.updateViewport()
+			return m.drainQueue()
 		}
 		// "allow-once" / "allow-always" → exec.finished will follow.
 		return nil
@@ -115,7 +114,6 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			logEvent("  EXEC_DENIED ignored (different session)")
 			return nil
 		}
-		m.sending = false
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
 			if last.role == "system" && last.content == "running..." {
@@ -124,7 +122,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			}
 		}
 		m.updateViewport()
-		return nil
+		return m.drainQueue()
 	}
 
 	if ev.EventName != protocol.EventChat {
@@ -169,43 +167,62 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 
 	case "final":
 		logEvent("  FINAL msgContent=%s", string(chatEv.Message))
-		m.sending = false
-		if len(m.messages) == 0 {
-			return nil
-		}
-		last := &m.messages[len(m.messages)-1]
-		if last.role == "assistant" && last.streaming {
-			last.streaming = false
-			logEvent("  FINALISED — refreshing history")
+		finalised := false
+		if len(m.messages) > 0 {
+			last := &m.messages[len(m.messages)-1]
+			if last.role == "assistant" && last.streaming {
+				last.streaming = false
+				finalised = true
+				logEvent("  FINALISED — refreshing history")
+			}
 		}
 		m.updateViewport()
+		if !finalised {
+			// Empty ack from gateway — the real response hasn't arrived yet.
+			logEvent("  FINAL ignored (no streaming assistant message)")
+			return nil
+		}
+		drainCmd := m.drainQueue()
+		if m.sending {
+			// Still draining the queue — defer history refresh until the queue is empty
+			// to avoid replacing m.messages while queued user messages are visible.
+			return drainCmd
+		}
 		return tea.Batch(m.refreshHistory(), m.loadStats())
 
 	case "error":
 		logEvent("  ERROR: %s", chatEv.ErrorMessage)
-		m.sending = false
-		if len(m.messages) == 0 {
-			return nil
-		}
-		last := &m.messages[len(m.messages)-1]
-		if last.role == "assistant" && last.streaming {
-			last.streaming = false
-			last.errMsg = chatEv.ErrorMessage
+		finalised := false
+		if len(m.messages) > 0 {
+			last := &m.messages[len(m.messages)-1]
+			if last.role == "assistant" && last.streaming {
+				last.streaming = false
+				last.errMsg = chatEv.ErrorMessage
+				finalised = true
+			}
 		}
 		m.updateViewport()
+		if !finalised {
+			return nil
+		}
+		return m.drainQueue()
 
 	case "aborted":
 		logEvent("  ABORTED")
-		m.sending = false
-		if len(m.messages) == 0 {
-			return nil
-		}
-		last := &m.messages[len(m.messages)-1]
-		if last.role == "assistant" && last.streaming {
-			last.streaming = false
-			last.content += "\n[aborted]"
+		finalised := false
+		if len(m.messages) > 0 {
+			last := &m.messages[len(m.messages)-1]
+			if last.role == "assistant" && last.streaming {
+				last.streaming = false
+				last.content += "\n[aborted]"
+				finalised = true
+			}
 		}
 		m.updateViewport()
+		if !finalised {
+			return nil
+		}
+		return m.drainQueue()
 	}
 	return nil
 }
