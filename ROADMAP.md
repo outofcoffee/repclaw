@@ -17,3 +17,4 @@
 - shift+enter for new line doesn't work
 - Long user messages seem to be truncated
 - Timestamps appearing at the start of user messages in message history
+- When triggering the `/skills` command don't send it as a user message to the model
