@@ -7,15 +7,6 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-// renderMarkdown applies glamour markdown rendering to a completed message.
-func (m *chatModel) renderMarkdown(msg *chatMessage) {
-	if m.renderer != nil && msg.content != "" {
-		if rendered, err := m.renderer.Render(msg.content); err == nil {
-			msg.content = strings.TrimSpace(rendered)
-		}
-	}
-}
-
 func (m *chatModel) updateViewport() {
 	var b strings.Builder
 	contentWidth := m.width - 4
@@ -46,6 +37,9 @@ func (m *chatModel) updateViewport() {
 			} else if msg.streaming {
 				b.WriteString(wordWrap(msg.content, wrapWidth))
 				b.WriteString(cursorStyle.Render("_"))
+			} else if msg.rendered {
+				// Glamour-rendered content is already wrapped and contains ANSI codes.
+				b.WriteString(msg.content)
 			} else {
 				b.WriteString(wordWrap(msg.content, wrapWidth))
 			}

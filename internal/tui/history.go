@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 
 	"github.com/outofcoffee/repclaw/internal/client"
 )
@@ -25,8 +26,9 @@ type historyMessage struct {
 func (m chatModel) loadHistory() tea.Cmd {
 	sessionKey := m.sessionKey
 	cl := m.client
+	renderer := m.renderer
 	return func() tea.Msg {
-		msgs, err := fetchHistory(cl, sessionKey)
+		msgs, err := fetchHistory(cl, sessionKey, renderer)
 		return historyLoadedMsg{messages: msgs, err: err}
 	}
 }
@@ -34,13 +36,14 @@ func (m chatModel) loadHistory() tea.Cmd {
 func (m chatModel) refreshHistory() tea.Cmd {
 	sessionKey := m.sessionKey
 	cl := m.client
+	renderer := m.renderer
 	return func() tea.Msg {
-		msgs, err := fetchHistory(cl, sessionKey)
+		msgs, err := fetchHistory(cl, sessionKey, renderer)
 		return historyRefreshMsg{messages: msgs, err: err}
 	}
 }
 
-func fetchHistory(cl *client.Client, sessionKey string) ([]chatMessage, error) {
+func fetchHistory(cl *client.Client, sessionKey string, renderer *glamour.TermRenderer) ([]chatMessage, error) {
 	raw, err := cl.ChatHistory(context.Background(), sessionKey, historyLimit)
 	if err != nil {
 		return nil, err
@@ -71,7 +74,14 @@ func fetchHistory(cl *client.Client, sessionKey string) ([]chatMessage, error) {
 				continue
 			}
 		}
-		msgs = append(msgs, chatMessage{role: role, content: text})
+		rendered := false
+		if role == "assistant" && renderer != nil {
+			if out, err := renderer.Render(text); err == nil {
+				text = strings.TrimSpace(out)
+				rendered = true
+			}
+		}
+		msgs = append(msgs, chatMessage{role: role, content: text, rendered: rendered})
 	}
 	return msgs, nil
 }

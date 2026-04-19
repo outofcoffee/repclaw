@@ -50,7 +50,7 @@ func newChatModel(c *client.Client, sessionKey, agentName, modelID string) chatM
 
 	renderer, _ := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(0),
+		glamour.WithWordWrap(80), // updated by setSize() when terminal dimensions are known
 	)
 
 	return chatModel{
@@ -290,6 +290,20 @@ func (m *chatModel) sendMessage(text string) tea.Cmd {
 func (m *chatModel) setSize(w, h int) {
 	m.width = w
 	m.height = h
+
+	// Recreate the glamour renderer with the new wrap width.
+	prefixLen := len(m.agentName) + 2
+	wrapWidth := w - 4 - prefixLen // contentWidth minus prefix
+	if wrapWidth < 20 {
+		wrapWidth = 20
+	}
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(wrapWidth),
+	)
+	if err == nil {
+		m.renderer = renderer
+	}
 
 	headerH := 1
 	helpH := 1

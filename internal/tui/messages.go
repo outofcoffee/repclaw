@@ -8,6 +8,7 @@ type chatMessage struct {
 	content   string
 	streaming bool
 	errMsg    string
+	rendered  bool // true if content has been glamour-rendered (contains ANSI codes)
 }
 
 // sessionStats holds token usage stats for display.
