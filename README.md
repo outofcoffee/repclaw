@@ -96,12 +96,17 @@ Type these in the chat input. Tab autocompletes partial commands.
 | Command | Action |
 |---------|--------|
 | `/help` | Show available commands |
+| `/agents` | Return to agent picker |
+| `/clear` | Clear chat display |
+| `/compact` | Compact session context (with confirmation) |
+| `/config` | Open preferences |
 | `/model` | List available models |
 | `/model <name>` | Switch model (fuzzy match) |
+| `/reset` | Delete session and start fresh (with confirmation) |
+| `/sessions` | Browse and restore previous sessions |
+| `/skills` | List available agent skills |
 | `/stats` | Show token usage and cost breakdown |
-| `/clear` | Clear chat display |
-| `/agents` | Return to agent picker |
-| `/quit` | Quit repclaw |
+| `/quit`, `/exit` | Quit repclaw |
 
 ## Remote commands
 
