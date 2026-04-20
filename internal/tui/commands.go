@@ -10,7 +10,7 @@ import (
 )
 
 // slashCommands is the list of available slash commands for autocomplete.
-var slashCommands = []string{"/back", "/clear", "/exit", "/help", "/model", "/quit", "/skills", "/stats"}
+var slashCommands = []string{"/agents", "/clear", "/exit", "/help", "/model", "/quit", "/skills", "/stats"}
 
 // completeSlashCommand returns the first matching slash command for the given
 // prefix, or "" if no match. Includes skill names as slash commands.
@@ -51,14 +51,14 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 	switch command {
 	case "/quit", "/exit":
 		return true, tea.Quit
-	case "/back":
+	case "/agents":
 		return true, func() tea.Msg { return goBackMsg{} }
 	case "/clear":
 		m.messages = nil
 		m.updateViewport()
 		return true, nil
 	case "/help":
-		helpText := "/quit, /exit — quit repclaw\n/back — return to agent list\n/clear — clear chat display\n/model — list available models\n/model <name> — switch model\n/stats — show session statistics\n/skills — list available agent skills\n/help — show this help\n\n!<command> — run command on gateway host"
+		helpText := "/quit, /exit — quit repclaw\n/agents — return to agent picker\n/clear — clear chat display\n/model — list available models\n/model <name> — switch model\n/stats — show session statistics\n/skills — list available agent skills\n/help — show this help\n\n!<command> — run command on gateway host"
 		if len(m.skills) > 0 {
 			helpText += fmt.Sprintf("\n\n%d agent skill(s) available — type /skills to list", len(m.skills))
 		}
