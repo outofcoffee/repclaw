@@ -57,6 +57,21 @@ func TestSlashCommand_Back(t *testing.T) {
 	}
 }
 
+func TestSlashCommand_Agents(t *testing.T) {
+	m := newSlashTestModel()
+	handled, cmd := m.handleSlashCommand("/agents")
+	if !handled {
+		t.Fatal("expected /agents to be handled")
+	}
+	if cmd == nil {
+		t.Fatal("expected a goBackMsg cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(goBackMsg); !ok {
+		t.Errorf("expected goBackMsg, got %T", msg)
+	}
+}
+
 func TestSlashCommand_Clear(t *testing.T) {
 	m := newSlashTestModel()
 	handled, cmd := m.handleSlashCommand("/clear")
@@ -145,8 +160,10 @@ func TestCompleteSlashCommand(t *testing.T) {
 		{"/b", "/back"},
 		{"/c", "/clear"},
 		{"/e", "/exit"},
+		{"/a", "/agents"},
+		{"/agents", "/agents"},
 		{"/z", ""},
-		{"/", "/back"},
+		{"/", "/agents"},
 		{"/H", "/help"},
 	}
 	for _, tt := range tests {

@@ -100,7 +100,7 @@ Type these in the chat input. Tab autocompletes partial commands.
 | `/model <name>` | Switch model (fuzzy match) |
 | `/stats` | Show token usage and cost breakdown |
 | `/clear` | Clear chat display |
-| `/back` | Return to agent list |
+| `/agents`, `/back` | Return to agent picker |
 | `/quit` | Quit repclaw |
 
 ## Remote commands
