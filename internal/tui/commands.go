@@ -78,6 +78,9 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 		m.updateViewport()
 		return true, nil
 	case "/skills":
+		// Local-only: the skill listing is rendered in the TUI and must never
+		// be sent to the gateway as a user message. Always role="system" and
+		// return a nil cmd so no network call is scheduled.
 		if len(m.skills) == 0 {
 			m.messages = append(m.messages, chatMessage{role: "system", content: "No agent skills found.\nPlace skills in <cwd>/.agents/skills/<name>/SKILL.md or ~/.agents/skills/<name>/SKILL.md"})
 		} else {

@@ -22,4 +22,4 @@
 - ~~shift+enter for new line doesn't work~~ (shift+enter or alt+enter)
 - Long user messages seem to be truncated
 - Timestamps appearing at the start of user messages in message history
-- When triggering the `/skills` command don't send the output as a user message to the model
+- ~~When triggering the `/skills` command don't send the output as a user message to the model~~

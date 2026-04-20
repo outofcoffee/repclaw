@@ -48,29 +48,6 @@ func TestParseSkillFile_UnclosedFrontmatter(t *testing.T) {
 	}
 }
 
-func TestSkillCatalogBlock(t *testing.T) {
-	skills := []agentSkill{
-		{Name: "review", Description: "Code review"},
-		{Name: "test", Description: "Write tests"},
-	}
-	block := skillCatalogBlock(skills)
-	if block == "" {
-		t.Fatal("expected non-empty catalog block")
-	}
-	if !contains(block, "review") || !contains(block, "test") {
-		t.Error("catalog block should contain skill names")
-	}
-	if !contains(block, "System:") {
-		t.Error("catalog block should have System: prefix")
-	}
-}
-
-func TestSkillCatalogBlock_Empty(t *testing.T) {
-	if block := skillCatalogBlock(nil); block != "" {
-		t.Errorf("expected empty block for no skills, got %q", block)
-	}
-}
-
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
@@ -158,39 +135,6 @@ func TestSkillActivation(t *testing.T) {
 	}
 }
 
-func TestWithSkillCatalog(t *testing.T) {
-	m := newSlashTestModel()
-	m.skills = []agentSkill{
-		{Name: "review", Description: "Code review"},
-	}
-
-	// First call should prepend catalog.
-	result := m.withSkillCatalog("hello")
-	if !contains(result, "System:") {
-		t.Error("first message should contain skill catalog")
-	}
-	if !contains(result, "hello") {
-		t.Error("first message should contain original text")
-	}
-
-	// Second call should not prepend.
-	result2 := m.withSkillCatalog("world")
-	if contains(result2, "System:") {
-		t.Error("second message should not contain skill catalog")
-	}
-	if result2 != "world" {
-		t.Errorf("second message = %q, want %q", result2, "world")
-	}
-}
-
-func TestWithSkillCatalog_NoSkills(t *testing.T) {
-	m := newSlashTestModel()
-	result := m.withSkillCatalog("hello")
-	if result != "hello" {
-		t.Errorf("expected unmodified text with no skills, got %q", result)
-	}
-}
-
 func TestSkillsDiscoveredMsg_AddsMessage(t *testing.T) {
 	m := newSlashTestModel()
 	initialCount := len(m.messages)
@@ -238,13 +182,21 @@ func TestSkillsListCommand(t *testing.T) {
 	if !handled {
 		t.Fatal("expected /skills to be handled")
 	}
+	// /skills output is local-only — it must never return a cmd that would
+	// send it to the gateway.
 	if cmd != nil {
-		t.Error("expected nil cmd from /skills")
+		t.Error("expected nil cmd from /skills (output must stay local)")
+	}
+	if m.sending {
+		t.Error("/skills must not flip sending=true (no network activity)")
 	}
 	if len(m.messages) != initialCount+1 {
 		t.Fatalf("expected %d messages, got %d", initialCount+1, len(m.messages))
 	}
 	msg := m.messages[len(m.messages)-1]
+	if msg.role != "system" {
+		t.Errorf("skills list role = %q, want system (user role would send to model)", msg.role)
+	}
 	if !contains(msg.content, "/review") || !contains(msg.content, "/test") {
 		t.Errorf("skills list should contain skill names, got %q", msg.content)
 	}
@@ -254,11 +206,17 @@ func TestSkillsListCommand_Empty(t *testing.T) {
 	m := newSlashTestModel()
 	initialCount := len(m.messages)
 
-	handled, _ := m.handleSlashCommand("/skills")
+	handled, cmd := m.handleSlashCommand("/skills")
 	if !handled {
 		t.Fatal("expected /skills to be handled")
 	}
+	if cmd != nil {
+		t.Error("expected nil cmd from /skills (output must stay local)")
+	}
 	msg := m.messages[len(m.messages)-1]
+	if msg.role != "system" {
+		t.Errorf("empty-skills message role = %q, want system", msg.role)
+	}
 	if !contains(msg.content, "No agent skills found") {
 		t.Errorf("expected empty skills message, got %q", msg.content)
 	}

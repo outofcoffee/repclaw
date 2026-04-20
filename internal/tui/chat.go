@@ -21,21 +21,20 @@ const inputHeight = 3
 
 // chatModel is the chat view.
 type chatModel struct {
-	viewport         viewport.Model
-	textarea         textarea.Model
-	messages         []chatMessage
-	client           *client.Client
-	sessionKey       string
-	agentName        string
-	sending          bool
-	pendingMessages  []string
-	width            int
-	height           int
-	renderer         *glamour.TermRenderer
-	stats            *sessionStats
-	modelID          string
-	skills           []agentSkill
-	skillCatalogSent bool
+	viewport        viewport.Model
+	textarea        textarea.Model
+	messages        []chatMessage
+	client          *client.Client
+	sessionKey      string
+	agentName       string
+	sending         bool
+	pendingMessages []string
+	width           int
+	height          int
+	renderer        *glamour.TermRenderer
+	stats           *sessionStats
+	modelID         string
+	skills          []agentSkill
 }
 
 func newChatModel(c *client.Client, sessionKey, agentName, modelID string) chatModel {
@@ -239,7 +238,7 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			m.messages = append(m.messages, chatMessage{role: "user", content: text})
 			m.sending = true
 			m.updateViewport()
-			cmds = append(cmds, m.sendMessage(m.withSkillCatalog(text)))
+			cmds = append(cmds, m.sendMessage(text))
 			return m, tea.Batch(cmds...)
 		}
 
@@ -310,17 +309,6 @@ func (m *chatModel) sendMessage(text string) tea.Cmd {
 		_, err := m.client.ChatSend(context.Background(), sessionKey, text, idemKey)
 		return chatSentMsg{err: err}
 	}
-}
-
-// withSkillCatalog prepends the skill catalog to the message text on the first
-// send. The catalog uses "System:" prefixed lines which stripSystemLines removes
-// from display in history.
-func (m *chatModel) withSkillCatalog(text string) string {
-	if m.skillCatalogSent || len(m.skills) == 0 {
-		return text
-	}
-	m.skillCatalogSent = true
-	return skillCatalogBlock(m.skills) + "\n" + text
 }
 
 // drainQueue sends the next queued message if any are pending.

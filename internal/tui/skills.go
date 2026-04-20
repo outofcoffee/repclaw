@@ -126,19 +126,3 @@ func prefixAllLines(text string) string {
 	}
 	return strings.Join(lines, "\n")
 }
-
-// skillCatalogBlock returns a System: prefixed block listing available skills.
-// This is prepended to the first user message so the agent knows what's available.
-// Every line is prefixed with "System:" so that stripSystemLines removes the
-// entire block from display after a history refresh.
-func skillCatalogBlock(skills []agentSkill) string {
-	if len(skills) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("Available agent skills (activate with /skill-name):\n")
-	for _, s := range skills {
-		b.WriteString(fmt.Sprintf("  - %s: %s\n", s.Name, s.Description))
-	}
-	return prefixAllLines(b.String())
-}
