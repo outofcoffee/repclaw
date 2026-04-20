@@ -43,21 +43,6 @@ func TestSlashCommand_Exit(t *testing.T) {
 	}
 }
 
-func TestSlashCommand_Back(t *testing.T) {
-	m := newSlashTestModel()
-	handled, cmd := m.handleSlashCommand("/back")
-	if !handled {
-		t.Fatal("expected /back to be handled")
-	}
-	if cmd == nil {
-		t.Fatal("expected a goBackMsg cmd")
-	}
-	msg := cmd()
-	if _, ok := msg.(goBackMsg); !ok {
-		t.Errorf("expected goBackMsg, got %T", msg)
-	}
-}
-
 func TestSlashCommand_Agents(t *testing.T) {
 	m := newSlashTestModel()
 	handled, cmd := m.handleSlashCommand("/agents")
@@ -107,7 +92,7 @@ func TestSlashCommand_Help(t *testing.T) {
 	}
 
 	// Every advertised command should appear in the help text.
-	for _, want := range []string{"/quit", "/exit", "/agents", "/back", "/clear", "/model", "/stats", "/skills", "/help"} {
+	for _, want := range []string{"/quit", "/exit", "/agents", "/clear", "/model", "/stats", "/skills", "/help"} {
 		if !strings.Contains(last.content, want) {
 			t.Errorf("/help text missing %q\ngot: %s", want, last.content)
 		}
@@ -316,11 +301,11 @@ func TestCompleteSlashCommand(t *testing.T) {
 		{"/he", "/help"},
 		{"/help", "/help"},
 		{"/q", "/quit"},
-		{"/b", "/back"},
 		{"/c", "/clear"},
 		{"/e", "/exit"},
 		{"/a", "/agents"},
 		{"/agents", "/agents"},
+		{"/b", ""},
 		{"/z", ""},
 		{"/", "/agents"},
 		{"/H", "/help"},
