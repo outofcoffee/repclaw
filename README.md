@@ -14,6 +14,7 @@ No file browsers, no task boards, no dashboards. Just chat.
 
 ### Highlights
 
+- **Chat with your OpenClaw agents** from the terminal — streaming responses, conversation history, multi-agent support
 - **Create agents** directly from the TUI — name, workspace, done
 - **Markdown rendering** for assistant messages via Glamour
 - **Remote command execution** — prefix with `!` to run commands on the gateway host
