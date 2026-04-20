@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/outofcoffee/repclaw/internal/client"
+	"github.com/outofcoffee/repclaw/internal/config"
 )
 
 const inputHeight = 3
@@ -45,6 +46,8 @@ type chatModel struct {
 	skillCatalogSent bool
 	spinnerFrame     int
 	spinnerTicking   bool
+	prefs            config.Preferences
+	pendingConfirm   *pendingConfirmation
 }
 
 func spinnerTickCmd() tea.Cmd {
@@ -72,7 +75,7 @@ func (m *chatModel) ensureSpinnerTicking() tea.Cmd {
 	return spinnerTickCmd()
 }
 
-func newChatModel(c *client.Client, sessionKey, agentID, agentName, modelID string) chatModel {
+func newChatModel(c *client.Client, sessionKey, agentID, agentName, modelID string, prefs config.Preferences) chatModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -100,6 +103,7 @@ func newChatModel(c *client.Client, sessionKey, agentID, agentName, modelID stri
 		agentName:  agentName,
 		renderer:   renderer,
 		modelID:    modelID,
+		prefs:      prefs,
 	}
 }
 
@@ -200,6 +204,26 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case sessionCompactedMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{role: "system", errMsg: fmt.Sprintf("compact failed: %v", msg.err)})
+		} else {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "Session compacted."})
+		}
+		m.updateViewport()
+		return m, nil
+
+	case sessionClearedMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{role: "system", errMsg: fmt.Sprintf("clear session failed: %v", msg.err)})
+		} else {
+			m.sessionKey = msg.newSessionKey
+			m.messages = nil
+			m.messages = append(m.messages, chatMessage{role: "system", content: "Session cleared. Starting fresh."})
+		}
+		m.updateViewport()
+		return m, nil
+
 	case statsLoadedMsg:
 		if msg.err == nil && msg.stats != nil {
 			m.stats = msg.stats
@@ -254,6 +278,22 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		case "enter":
 			text := strings.TrimSpace(m.textarea.Value())
 			if text == "" {
+				return m, nil
+			}
+
+			// Resolve a pending confirmation prompt.
+			if m.pendingConfirm != nil {
+				m.textarea.Reset()
+				confirm := m.pendingConfirm
+				m.pendingConfirm = nil
+				lower := strings.ToLower(text)
+				if lower == "y" || lower == "yes" {
+					m.messages = append(m.messages, chatMessage{role: "system", content: "Confirmed."})
+					m.updateViewport()
+					return m, confirm.action()
+				}
+				m.messages = append(m.messages, chatMessage{role: "system", content: "Cancelled."})
+				m.updateViewport()
 				return m, nil
 			}
 

@@ -216,6 +216,20 @@ func (c *Client) ExecResolve(ctx context.Context, id, decision string) (*protoco
 	})
 }
 
+// SessionCompact compacts (summarises) the session context.
+func (c *Client) SessionCompact(ctx context.Context, sessionKey string) error {
+	return c.gw.SessionsCompact(ctx, protocol.SessionsCompactParams{Key: sessionKey})
+}
+
+// SessionDelete deletes a session and its transcript.
+func (c *Client) SessionDelete(ctx context.Context, sessionKey string) error {
+	deleteTranscript := true
+	return c.gw.SessionsDelete(ctx, protocol.SessionsDeleteParams{
+		Key:              sessionKey,
+		DeleteTranscript: &deleteTranscript,
+	})
+}
+
 // GW returns the underlying gateway client (for direct RPC access).
 func (c *Client) GW() *gateway.Client { return c.gw }
 

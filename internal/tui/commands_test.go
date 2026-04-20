@@ -307,7 +307,7 @@ func TestCompleteSlashCommand(t *testing.T) {
 		{"/agents", "/agents"},
 		{"/b", ""},
 		{"/z", ""},
-		{"/", "/agents"},
+		{"/", "/commands"},
 		{"/H", "/help"},
 	}
 	for _, tt := range tests {
@@ -344,6 +344,63 @@ func TestSlashCommandHint(t *testing.T) {
 				t.Errorf("slashCommandHint(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSlashCommand_Compact_SetsConfirmation(t *testing.T) {
+	m := newSlashTestModel()
+	initialCount := len(m.messages)
+
+	handled, cmd := m.handleSlashCommand("/compact")
+	if !handled {
+		t.Fatal("expected /compact to be handled")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd (waiting for confirmation)")
+	}
+	if m.pendingConfirm == nil {
+		t.Fatal("expected pendingConfirm to be set")
+	}
+	if len(m.messages) != initialCount+1 {
+		t.Fatalf("expected %d messages, got %d", initialCount+1, len(m.messages))
+	}
+	last := m.messages[len(m.messages)-1]
+	if last.role != "system" || !strings.Contains(last.content, "y/n") {
+		t.Errorf("expected confirmation prompt, got: %+v", last)
+	}
+}
+
+func TestSlashCommand_Reset_SetsConfirmation(t *testing.T) {
+	m := newSlashTestModel()
+	initialCount := len(m.messages)
+
+	handled, cmd := m.handleSlashCommand("/reset")
+	if !handled {
+		t.Fatal("expected /clear-session to be handled")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd (waiting for confirmation)")
+	}
+	if m.pendingConfirm == nil {
+		t.Fatal("expected pendingConfirm to be set")
+	}
+	if len(m.messages) != initialCount+1 {
+		t.Fatalf("expected %d messages, got %d", initialCount+1, len(m.messages))
+	}
+	last := m.messages[len(m.messages)-1]
+	if last.role != "system" || !strings.Contains(last.content, "y/n") {
+		t.Errorf("expected confirmation prompt, got: %+v", last)
+	}
+}
+
+func TestSlashCommand_Help_IncludesNewCommands(t *testing.T) {
+	m := newSlashTestModel()
+	m.handleSlashCommand("/help")
+	last := m.messages[len(m.messages)-1]
+	for _, want := range []string{"/compact", "/reset"} {
+		if !strings.Contains(last.content, want) {
+			t.Errorf("/help text missing %q\ngot: %s", want, last.content)
+		}
 	}
 }
 

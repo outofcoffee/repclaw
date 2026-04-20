@@ -21,6 +21,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	teatest "github.com/charmbracelet/x/exp/teatest/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/outofcoffee/repclaw/internal/config"
 )
 
 // chatModelAdapter wraps chatModel so it satisfies tea.Model for teatest.
@@ -72,7 +74,7 @@ func (a selectModelAdapter) View() tea.View {
 // rendering tests, wrapped in an adapter.
 func newRenderingChatModel(t *testing.T, agentName string) chatModelAdapter {
 	t.Helper()
-	m := newChatModel(nil, "session-key", "", agentName, "")
+	m := newChatModel(nil, "session-key", "", agentName, "", config.DefaultPreferences())
 	m.setSize(120, 40)
 	return chatModelAdapter{inner: m}
 }

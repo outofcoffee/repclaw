@@ -9,13 +9,22 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// pendingConfirmation holds a deferred action awaiting user confirmation.
+type pendingConfirmation struct {
+	prompt string
+	action func() tea.Cmd
+}
+
 // slashCommands is the list of available slash commands for autocomplete.
-var slashCommands = []string{"/agents", "/clear", "/exit", "/help", "/model", "/quit", "/sessions", "/skills", "/stats"}
+var slashCommands = []string{"/agents", "/clear", "/commands", "/compact", "/config", "/exit", "/help", "/model", "/quit", "/reset", "/sessions", "/skills", "/stats"}
 
 // completeSlashCommand returns the first matching slash command for the given
 // prefix, or "" if no match. Includes skill names as slash commands.
 func (m *chatModel) completeSlashCommand(prefix string) string {
 	lower := strings.ToLower(prefix)
+	if lower == "/" {
+		return "/commands"
+	}
 	for _, cmd := range slashCommands {
 		if strings.HasPrefix(cmd, lower) {
 			return cmd
@@ -57,6 +66,52 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 		m.messages = nil
 		m.updateViewport()
 		return true, nil
+	case "/compact":
+		cl := m.client
+		sessionKey := m.sessionKey
+		m.pendingConfirm = &pendingConfirmation{
+			prompt: "Compact session context? This summarises older messages to reduce token usage. (y/n)",
+			action: func() tea.Cmd {
+				return func() tea.Msg {
+					err := cl.SessionCompact(context.Background(), sessionKey)
+					return sessionCompactedMsg{err: err}
+				}
+			},
+		}
+		m.messages = append(m.messages, chatMessage{
+			role:    "system",
+			content: m.pendingConfirm.prompt,
+		})
+		m.updateViewport()
+		return true, nil
+	case "/reset":
+		cl := m.client
+		sessionKey := m.sessionKey
+		agentID := m.agentID
+		m.pendingConfirm = &pendingConfirmation{
+			prompt: "Clear this session? This permanently deletes all messages and starts fresh. (y/n)",
+			action: func() tea.Cmd {
+				return func() tea.Msg {
+					if err := cl.SessionDelete(context.Background(), sessionKey); err != nil {
+						return sessionClearedMsg{err: err}
+					}
+					// Create a new session to replace the deleted one.
+					newKey, err := cl.CreateSession(context.Background(), agentID, "")
+					if err != nil {
+						return sessionClearedMsg{err: err}
+					}
+					return sessionClearedMsg{err: nil, newSessionKey: newKey}
+				}
+			},
+		}
+		m.messages = append(m.messages, chatMessage{
+			role:    "system",
+			content: m.pendingConfirm.prompt,
+		})
+		m.updateViewport()
+		return true, nil
+	case "/config":
+		return true, func() tea.Msg { return showConfigMsg{} }
 	case "/sessions":
 		agentID := m.agentID
 		agentName := m.agentName
@@ -70,8 +125,8 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 				mainKey:   sessionKey,
 			}
 		}
-	case "/help":
-		helpText := "/quit, /exit — quit repclaw\n/agents — return to agent picker\n/clear — clear chat display\n/model — list available models\n/model <name> — switch model\n/sessions — browse and restore previous sessions\n/stats — show session statistics\n/skills — list available agent skills\n/help — show this help\n\n!<command> — run command on gateway host"
+	case "/help", "/commands":
+		helpText := "/quit, /exit — quit repclaw\n/agents — return to agent picker\n/clear — clear chat display\n/compact — compact session context\n/config — open preferences\n/model — list available models\n/model <name> — switch model\n/reset — delete session and start fresh\n/sessions — browse and restore previous sessions\n/stats — show session statistics\n/skills — list available agent skills\n/help — show this help\n\n!<command> — run command on gateway host"
 		if len(m.skills) > 0 {
 			helpText += fmt.Sprintf("\n\n%d agent skill(s) available — type /skills to list", len(m.skills))
 		}

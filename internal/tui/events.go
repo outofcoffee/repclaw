@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/a3tai/openclaw-go/protocol"
@@ -183,13 +184,19 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			logEvent("  FINAL ignored (no streaming assistant message)")
 			return nil
 		}
+		var cmds []tea.Cmd
+		if m.prefs.CompletionBell {
+			cmds = append(cmds, bellCmd())
+		}
 		drainCmd := m.drainQueue()
 		if m.sending {
 			// Still draining the queue — defer history refresh until the queue is empty
 			// to avoid replacing m.messages while queued user messages are visible.
-			return drainCmd
+			cmds = append(cmds, drainCmd)
+			return tea.Batch(cmds...)
 		}
-		return tea.Batch(m.refreshHistory(), m.loadStats())
+		cmds = append(cmds, m.refreshHistory(), m.loadStats())
+		return tea.Batch(cmds...)
 
 	case "error":
 		logEvent("  ERROR: %s", chatEv.ErrorMessage)
@@ -226,4 +233,12 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		return m.drainQueue()
 	}
 	return nil
+}
+
+// bellCmd returns a command that writes a BEL character to the terminal.
+func bellCmd() tea.Cmd {
+	return func() tea.Msg {
+		_, _ = os.Stdout.Write([]byte("\a"))
+		return nil
+	}
 }

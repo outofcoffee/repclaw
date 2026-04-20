@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/a3tai/openclaw-go/protocol"
+import (
+	"github.com/a3tai/openclaw-go/protocol"
+
+	"github.com/outofcoffee/repclaw/internal/config"
+)
 
 // chatMessage represents a single message in the conversation.
 type chatMessage struct {
@@ -124,6 +128,26 @@ type newSessionCreatedMsg struct {
 	agentName  string
 	modelID    string
 	err        error
+}
+
+// showConfigMsg signals the AppModel to switch to the config view.
+type showConfigMsg struct{}
+
+// goBackFromConfigMsg signals the AppModel to return to the chat view from config.
+type goBackFromConfigMsg struct{}
+
+// prefsUpdatedMsg carries updated preferences after a config toggle.
+type prefsUpdatedMsg struct {
+	prefs config.Preferences
+}
+
+// sessionCompactedMsg is returned after compacting a session.
+type sessionCompactedMsg struct{ err error }
+
+// sessionClearedMsg is returned after clearing (deleting) a session.
+type sessionClearedMsg struct {
+	err           error
+	newSessionKey string
 }
 
 // spinnerTickMsg advances the streaming-response placeholder animation.
