@@ -74,19 +74,26 @@ openclaw device approve <device-id>
 
 Then restart repclaw — subsequent connections use the stored device token automatically.
 
-### 3. Start chatting
+### 3. Pick an agent
 
-Select an agent from the list, then start chatting. Press `n` on the agent list to create a new agent.
+Select an agent from the list to start chatting.
 
-| Key | Context | Action |
-|-----|---------|--------|
-| `n` | Agent list | Create a new agent |
-| `Enter` | Agent list | Select agent |
-| `Enter` | Chat | Send message |
-| `Alt+Enter` | Chat | Insert newline |
-| `Ctrl+W` | Chat | Delete word |
-| `PgUp` / `PgDn` | Chat | Scroll chat history |
-| `Esc` | Chat | Back to agent list |
+| Key | Action |
+|-----|--------|
+| `Enter` | Select agent |
+| `n` | Create a new agent |
+| `Ctrl+C` | Quit |
+
+### 4. Chat
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Alt+Enter` | Insert newline |
+| `Ctrl+W` | Delete word |
+| `PgUp` / `PgDn` | Scroll chat history |
+| `Tab` | Autocomplete slash command |
+| `Esc` | Back to agent list |
 | `Ctrl+C` | Quit |
 
 ## Commands
