@@ -137,6 +137,5 @@ func (m AppModel) View() tea.View {
 	}
 	v.AltScreen = true
 	v.KeyboardEnhancements.ReportEventTypes = true
-	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 	return v
 }
