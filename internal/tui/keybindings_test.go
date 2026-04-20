@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -97,5 +98,114 @@ func TestUpKey_NonEmptyInputDoesNotRecall(t *testing.T) {
 	}
 	if len(m.pendingMessages) != 1 || m.pendingMessages[0] != "queued" {
 		t.Errorf("pendingMessages should be untouched, got %v", m.pendingMessages)
+	}
+}
+
+func TestUpKey_RecallingOnlyMessageEmptiesQueue(t *testing.T) {
+	m := newChatModel(nil, "main", "test", "")
+	m.viewport = viewport.New()
+	m.width = 80
+	m.height = 30
+	m.pendingMessages = []string{"solo"}
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	m, _ = m.Update(up)
+
+	if got, want := m.textarea.Value(), "solo"; got != want {
+		t.Errorf("textarea value: got %q, want %q", got, want)
+	}
+	if len(m.pendingMessages) != 0 {
+		t.Errorf("pendingMessages should be empty, got %v", m.pendingMessages)
+	}
+}
+
+func TestUpKey_SuccessiveRecallsPopInLIFOOrder(t *testing.T) {
+	m := newChatModel(nil, "main", "test", "")
+	m.viewport = viewport.New()
+	m.width = 80
+	m.height = 30
+	m.pendingMessages = []string{"a", "b", "c"}
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+
+	m, _ = m.Update(up)
+	if got, want := m.textarea.Value(), "c"; got != want {
+		t.Fatalf("first recall: got %q, want %q", got, want)
+	}
+
+	// Clearing the textarea lets the next up press recall again.
+	m.textarea.Reset()
+	m, _ = m.Update(up)
+	if got, want := m.textarea.Value(), "b"; got != want {
+		t.Fatalf("second recall: got %q, want %q", got, want)
+	}
+
+	m.textarea.Reset()
+	m, _ = m.Update(up)
+	if got, want := m.textarea.Value(), "a"; got != want {
+		t.Fatalf("third recall: got %q, want %q", got, want)
+	}
+
+	if len(m.pendingMessages) != 0 {
+		t.Errorf("expected empty queue after three recalls, got %v", m.pendingMessages)
+	}
+}
+
+func TestUpKey_RecallThenClearDiscardsMessage(t *testing.T) {
+	m := newChatModel(nil, "main", "test", "")
+	m.viewport = viewport.New()
+	m.width = 80
+	m.height = 30
+	m.pendingMessages = []string{"keep", "discard"}
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	m, _ = m.Update(up)
+
+	// User decides to delete the recalled message by clearing the input and
+	// not pressing enter. The queued message should stay gone.
+	m.textarea.Reset()
+
+	if len(m.pendingMessages) != 1 || m.pendingMessages[0] != "keep" {
+		t.Errorf("pendingMessages: got %v, want [keep]", m.pendingMessages)
+	}
+}
+
+func TestUpKey_RecallEditAndRequeueWhileSending(t *testing.T) {
+	m := newChatModel(nil, "main", "test", "")
+	m.viewport = viewport.New()
+	m.width = 80
+	m.height = 30
+	m.sending = true
+	m.pendingMessages = []string{"original"}
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	m, _ = m.Update(up)
+	if got, want := m.textarea.Value(), "original"; got != want {
+		t.Fatalf("recall: got %q, want %q", got, want)
+	}
+
+	// Edit the recalled text and press enter while the agent is still
+	// responding — it should re-queue with the new contents.
+	m.textarea.SetValue("edited")
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	m, _ = m.Update(enter)
+
+	if len(m.pendingMessages) != 1 || m.pendingMessages[0] != "edited" {
+		t.Errorf("pendingMessages: got %v, want [edited]", m.pendingMessages)
+	}
+	if got := m.textarea.Value(); got != "" {
+		t.Errorf("textarea should be reset after enter, got %q", got)
+	}
+}
+
+func TestView_HelpShowsUpHintWhenQueued(t *testing.T) {
+	m := newChatModel(nil, "main", "test", "")
+	m.viewport = viewport.New()
+	m.setSize(80, 30)
+	m.pendingMessages = []string{"one", "two"}
+
+	view := m.View()
+	if !strings.Contains(view, "2 queued (up: edit last)") {
+		t.Errorf("expected help text to advertise up-arrow recall, got:\n%s", view)
 	}
 }
