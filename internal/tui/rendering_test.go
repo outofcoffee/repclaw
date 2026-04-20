@@ -171,8 +171,23 @@ func TestRender_ChatView_StreamingCursor(t *testing.T) {
 	tm := teatest.NewTestModel(t, adapter, teatest.WithInitialTermSize(120, 40))
 	defer finishProgram(t, tm)
 
-	// Streaming assistant messages append a "_" cursor after the content.
-	waitForContains(t, tm.Output(), "partial response_")
+	// Streaming assistant messages append an animated spinner frame after
+	// the content. Any frame from spinnerFrames is acceptable.
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := ansi.Strip(string(b))
+		if !strings.Contains(s, "partial response") {
+			return false
+		}
+		for _, frame := range spinnerFrames {
+			if strings.Contains(s, "partial response"+frame) {
+				return true
+			}
+		}
+		return false
+	},
+		teatest.WithDuration(3*time.Second),
+		teatest.WithCheckInterval(25*time.Millisecond),
+	)
 }
 
 func TestRender_ChatView_SlashHelpRendersAsSystemMessage(t *testing.T) {
