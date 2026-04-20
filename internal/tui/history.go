@@ -11,8 +11,6 @@ import (
 	"github.com/outofcoffee/repclaw/internal/client"
 )
 
-const historyLimit = 20
-
 // historyResponse is the structure of the chat.history RPC response.
 type historyResponse struct {
 	Messages []historyMessage `json:"messages"`
@@ -27,8 +25,9 @@ func (m chatModel) loadHistory() tea.Cmd {
 	sessionKey := m.sessionKey
 	cl := m.client
 	renderer := m.renderer
+	limit := m.historyLimit
 	return func() tea.Msg {
-		msgs, err := fetchHistory(cl, sessionKey, renderer)
+		msgs, err := fetchHistory(cl, sessionKey, renderer, limit)
 		return historyLoadedMsg{messages: msgs, err: err}
 	}
 }
@@ -37,14 +36,15 @@ func (m chatModel) refreshHistory() tea.Cmd {
 	sessionKey := m.sessionKey
 	cl := m.client
 	renderer := m.renderer
+	limit := m.historyLimit
 	return func() tea.Msg {
-		msgs, err := fetchHistory(cl, sessionKey, renderer)
+		msgs, err := fetchHistory(cl, sessionKey, renderer, limit)
 		return historyRefreshMsg{messages: msgs, err: err}
 	}
 }
 
-func fetchHistory(cl *client.Client, sessionKey string, renderer *glamour.TermRenderer) ([]chatMessage, error) {
-	raw, err := cl.ChatHistory(context.Background(), sessionKey, historyLimit)
+func fetchHistory(cl *client.Client, sessionKey string, renderer *glamour.TermRenderer, limit int) ([]chatMessage, error) {
+	raw, err := cl.ChatHistory(context.Background(), sessionKey, limit)
 	if err != nil {
 		return nil, err
 	}

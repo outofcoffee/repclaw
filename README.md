@@ -54,6 +54,13 @@ OPENCLAW_GATEWAY_URL=https://your-gateway-host
 
 The gateway URL can use `https`, `http`, `wss`, or `ws` schemes. repclaw derives the WebSocket endpoint automatically.
 
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--history-limit <n>` | Number of messages to load per session (overrides the preference; default 50) |
+| `--version`, `-v` | Print version and exit |
+
 ### 2. Connect and approve the device
 
 ```sh
@@ -95,6 +102,17 @@ Select an agent from the list to start chatting.
 | `Tab` | Autocomplete slash command |
 | `Esc` | Back to agent list |
 | `Ctrl+C` | Quit |
+
+### Preferences
+
+Use `/config` to open the preferences view. Settings are persisted to `~/.repclaw/config.json`.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Completion notification | On | Ring the terminal bell when a response completes |
+| History limit | 50 | Number of messages loaded when restoring a session (range 10–500) |
+
+In the config view, use `Space` to toggle checkboxes and `←`/`→` to adjust numeric values.
 
 ## Commands
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -15,7 +16,13 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+	fs := flag.NewFlagSet("repclaw", flag.ExitOnError)
+	showVersion := fs.Bool("version", false, "print version and exit")
+	fs.BoolVar(showVersion, "v", false, "print version and exit")
+	historyLimit := fs.Int("history-limit", 0, "number of messages to load per session (overrides preference)")
+	_ = fs.Parse(os.Args[1:])
+
+	if *showVersion {
 		fmt.Printf("repclaw %s\n", version.Version)
 		return
 	}
@@ -41,7 +48,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	app := tui.NewApp(c)
+	var opts []tui.AppOption
+	if *historyLimit > 0 {
+		opts = append(opts, tui.WithHistoryLimit(*historyLimit))
+	}
+	app := tui.NewApp(c, opts...)
 	p := tea.NewProgram(app)
 
 	// Pump gateway events into the bubbletea program from a dedicated goroutine.

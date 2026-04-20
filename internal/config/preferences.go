@@ -6,15 +6,20 @@ import (
 	"path/filepath"
 )
 
+// DefaultHistoryLimit is the number of messages loaded when restoring a session.
+const DefaultHistoryLimit = 50
+
 // Preferences holds user-configurable settings persisted to disk.
 type Preferences struct {
 	CompletionBell bool `json:"completionBell"`
+	HistoryLimit   int  `json:"historyLimit"`
 }
 
 // DefaultPreferences returns the default preference values.
 func DefaultPreferences() Preferences {
 	return Preferences{
 		CompletionBell: true,
+		HistoryLimit:   DefaultHistoryLimit,
 	}
 }
 
@@ -46,6 +51,9 @@ func LoadPreferences() Preferences {
 	var p Preferences
 	if err := json.Unmarshal(data, &p); err != nil {
 		return DefaultPreferences()
+	}
+	if p.HistoryLimit <= 0 {
+		p.HistoryLimit = DefaultHistoryLimit
 	}
 	return p
 }

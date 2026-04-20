@@ -48,6 +48,7 @@ type chatModel struct {
 	spinnerTicking   bool
 	prefs            config.Preferences
 	pendingConfirm   *pendingConfirmation
+	historyLimit     int
 }
 
 func spinnerTickCmd() tea.Cmd {
@@ -95,15 +96,16 @@ func newChatModel(c *client.Client, sessionKey, agentID, agentName, modelID stri
 	)
 
 	return chatModel{
-		viewport:   vp,
-		textarea:   ta,
-		client:     c,
-		sessionKey: sessionKey,
-		agentID:    agentID,
-		agentName:  agentName,
-		renderer:   renderer,
-		modelID:    modelID,
-		prefs:      prefs,
+		viewport:     vp,
+		textarea:     ta,
+		client:       c,
+		sessionKey:   sessionKey,
+		agentID:      agentID,
+		agentName:    agentName,
+		renderer:     renderer,
+		modelID:      modelID,
+		prefs:        prefs,
+		historyLimit: prefs.HistoryLimit,
 	}
 }
 

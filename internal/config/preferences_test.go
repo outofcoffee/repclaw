@@ -11,6 +11,9 @@ func TestDefaultPreferences(t *testing.T) {
 	if !p.CompletionBell {
 		t.Error("expected CompletionBell to default to true")
 	}
+	if p.HistoryLimit != DefaultHistoryLimit {
+		t.Errorf("expected HistoryLimit %d, got %d", DefaultHistoryLimit, p.HistoryLimit)
+	}
 }
 
 func TestSaveAndLoadPreferences(t *testing.T) {
@@ -20,7 +23,7 @@ func TestSaveAndLoadPreferences(t *testing.T) {
 	t.Setenv("HOME", dir)
 	defer func() { _ = os.Setenv("HOME", origHome) }()
 
-	p := Preferences{CompletionBell: false}
+	p := Preferences{CompletionBell: false, HistoryLimit: 100}
 	if err := SavePreferences(p); err != nil {
 		t.Fatalf("SavePreferences: %v", err)
 	}
@@ -34,6 +37,28 @@ func TestSaveAndLoadPreferences(t *testing.T) {
 	loaded := LoadPreferences()
 	if loaded.CompletionBell != false {
 		t.Error("expected CompletionBell to be false after save/load")
+	}
+	if loaded.HistoryLimit != 100 {
+		t.Errorf("expected HistoryLimit 100, got %d", loaded.HistoryLimit)
+	}
+}
+
+func TestLoadPreferences_MissingHistoryLimit(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	// Write a config file without historyLimit (simulates upgrade from old version).
+	configDir := filepath.Join(dir, ".repclaw")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{"completionBell":true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := LoadPreferences()
+	if loaded.HistoryLimit != DefaultHistoryLimit {
+		t.Errorf("expected default HistoryLimit %d for old config, got %d", DefaultHistoryLimit, loaded.HistoryLimit)
 	}
 }
 

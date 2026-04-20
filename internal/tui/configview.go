@@ -10,10 +10,22 @@ import (
 	"github.com/outofcoffee/repclaw/internal/config"
 )
 
+type configItemKind int
+
+const (
+	configItemBool configItemKind = iota
+	configItemInt
+)
+
 type configItem struct {
 	label   string
 	key     string
-	checked bool
+	kind    configItemKind
+	checked bool // for bool items
+	value   int  // for int items
+	min     int
+	max     int
+	step    int
 }
 
 type configModel struct {
@@ -28,7 +40,8 @@ func newConfigModel(prefs config.Preferences) configModel {
 	return configModel{
 		prefs: prefs,
 		items: []configItem{
-			{label: "Completion notification (terminal bell)", key: "completionBell", checked: prefs.CompletionBell},
+			{label: "Completion notification (terminal bell)", key: "completionBell", kind: configItemBool, checked: prefs.CompletionBell},
+			{label: "History limit (messages loaded per session)", key: "historyLimit", kind: configItemInt, value: prefs.HistoryLimit, min: 10, max: 500, step: 10},
 		},
 	}
 }
@@ -48,12 +61,37 @@ func (m configModel) Update(msg tea.Msg) (configModel, tea.Cmd) {
 				m.cursor++
 			}
 		case "space":
-			m.items[m.cursor].checked = !m.items[m.cursor].checked
-			m.applyToPrefs()
-			prefs := m.prefs
-			return m, func() tea.Msg {
-				_ = config.SavePreferences(prefs)
-				return prefsUpdatedMsg{prefs: prefs}
+			item := &m.items[m.cursor]
+			if item.kind == configItemBool {
+				item.checked = !item.checked
+				m.applyToPrefs()
+				prefs := m.prefs
+				return m, func() tea.Msg {
+					_ = config.SavePreferences(prefs)
+					return prefsUpdatedMsg{prefs: prefs}
+				}
+			}
+		case "left", "h":
+			item := &m.items[m.cursor]
+			if item.kind == configItemInt && item.value-item.step >= item.min {
+				item.value -= item.step
+				m.applyToPrefs()
+				prefs := m.prefs
+				return m, func() tea.Msg {
+					_ = config.SavePreferences(prefs)
+					return prefsUpdatedMsg{prefs: prefs}
+				}
+			}
+		case "right", "l":
+			item := &m.items[m.cursor]
+			if item.kind == configItemInt && item.value+item.step <= item.max {
+				item.value += item.step
+				m.applyToPrefs()
+				prefs := m.prefs
+				return m, func() tea.Msg {
+					_ = config.SavePreferences(prefs)
+					return prefsUpdatedMsg{prefs: prefs}
+				}
 			}
 		case "esc":
 			return m, func() tea.Msg { return goBackFromConfigMsg{} }
@@ -67,6 +105,8 @@ func (m *configModel) applyToPrefs() {
 		switch item.key {
 		case "completionBell":
 			m.prefs.CompletionBell = item.checked
+		case "historyLimit":
+			m.prefs.HistoryLimit = item.value
 		}
 	}
 }
@@ -79,12 +119,17 @@ func (m configModel) View() string {
 	b.WriteString("\n\n")
 
 	for i, item := range m.items {
-		check := "[ ]"
-		if item.checked {
-			check = "[x]"
+		var line string
+		switch item.kind {
+		case configItemBool:
+			check := "[ ]"
+			if item.checked {
+				check = "[x]"
+			}
+			line = fmt.Sprintf("  %s %s", check, item.label)
+		case configItemInt:
+			line = fmt.Sprintf("  ◀ %d ▶  %s", item.value, item.label)
 		}
-
-		line := fmt.Sprintf("  %s %s", check, item.label)
 		if i == m.cursor {
 			line = lipgloss.NewStyle().Foreground(accent).Bold(true).Render(line)
 		}
@@ -93,7 +138,7 @@ func (m configModel) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("  space: toggle · esc: back"))
+	b.WriteString(helpStyle.Render("  space: toggle · ←/→: adjust · esc: back"))
 
 	return b.String()
 }
