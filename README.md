@@ -8,18 +8,18 @@ The terminal client for [OpenClaw](https://github.com/openclaw/openclaw).
 
 ## What it does
 
-repclaw is the terminal-native client for OpenClaw. Connect to your gateway, pick an agent, and chat — with streaming responses, markdown rendering, and a keyboard-driven interface that doesn't make you reach for the mouse.
+repclaw is the terminal-native client for OpenClaw. Connect to your gateway, pick an agent, and start chatting. Responses stream in live, messages render as markdown, and you never need to reach for the mouse.
 
 No file browsers, no task boards, no dashboards. Just chat.
 
 ### Highlights
 
-- **Chat with your OpenClaw agents** from the terminal — streaming responses, conversation history, multi-agent support
-- **Create agents** directly from the TUI — name, workspace, done
-- **Markdown rendering** for assistant messages via Glamour
-- **Remote command execution** — prefix with `!` to run commands on the gateway host
-- **Message queueing** — keep typing while the agent is responding
-- **Local agent skills** — drop skills into `~/.agents/skills/` and use them as slash commands
+- **Chat with your OpenClaw agents** from the terminal, with streaming responses, conversation history, and multi-agent support
+- **Create agents** directly from the TUI
+- **Markdown rendering** for assistant messages
+- **Remote command execution** on the gateway host via `!` prefix
+- **Message queueing** so you can keep typing while the agent is responding
+- **Local agent skills** loaded from `~/.agents/skills/` as slash commands
 - **Live token/cost stats** in the header bar
 
 ## Install
