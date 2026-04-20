@@ -9,6 +9,10 @@
 - Need a way to amend pending message (including deleting it) by pressing 'up'
 - Improve stats table (could render using markdown renderer?)
 - Show session name as well as agent name
+- Session browser — navigate and restore previous conversations (not just recent history on startup)
+- Persistent model switching — persist `/model` selection across restarts per agent
+- Completion notification — terminal bell (or optional system notification) when a long response finishes while the window is unfocused
+- Skill discovery — `/skills search <term>` to browse and install skills from the ClawHub registry without leaving the TUI
 
 ## Bugs
 
