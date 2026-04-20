@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/outofcoffee/repclaw/internal/client"
 	"github.com/outofcoffee/repclaw/internal/config"
@@ -42,7 +42,7 @@ func main() {
 	}
 
 	app := tui.NewApp(c)
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(app)
 
 	// Pump gateway events into the bubbletea program from a dedicated goroutine.
 	// This is more reliable than a cmd-chain that must be re-issued after each event.

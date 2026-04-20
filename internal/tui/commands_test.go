@@ -3,11 +3,11 @@ package tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 )
 
 func newSlashTestModel() *chatModel {
-	vp := viewport.New(80, 20)
+	vp := viewport.New()
 	return &chatModel{
 		viewport:  vp,
 		agentName: "test",

@@ -73,8 +73,8 @@ func (m *chatModel) updateViewport() {
 
 	// Pad the top so messages are anchored to the bottom of the viewport.
 	contentLines := strings.Count(content, "\n")
-	if contentLines < m.viewport.Height {
-		padding := strings.Repeat("\n", m.viewport.Height-contentLines)
+	if contentLines < m.viewport.Height() {
+		padding := strings.Repeat("\n", m.viewport.Height()-contentLines)
 		content = padding + content
 	}
 

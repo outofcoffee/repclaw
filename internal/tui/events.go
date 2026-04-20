@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/a3tai/openclaw-go/protocol"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // chatFinalMessage is the structure of the "message" field in a "final" chat event.

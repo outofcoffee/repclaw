@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/a3tai/openclaw-go/protocol"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/outofcoffee/repclaw/internal/client"
 )
@@ -45,11 +45,11 @@ func newChatModel(c *client.Client, sessionKey, agentName, modelID string) chatM
 	ta.CharLimit = 0
 	ta.SetHeight(inputHeight)
 	ta.ShowLineNumbers = false
-	ta.KeyMap.InsertNewline.SetKeys("shift+enter")
+	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter")
 	ta.KeyMap.DeleteWordBackward.SetKeys("alt+backspace", "ctrl+w")
 	ta.KeyMap.DeleteWordForward.SetKeys("alt+delete", "alt+d")
 
-	vp := viewport.New(0, 0)
+	vp := viewport.New()
 
 	renderer, _ := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
@@ -188,8 +188,8 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
-		logEvent("KEY type=%d alt=%v string=%q", msg.Type, msg.Alt, msg.String())
+	case tea.KeyPressMsg:
+		logEvent("KEY code=%d mod=%v string=%q", msg.Code, msg.Mod, msg.String())
 		switch msg.String() {
 		case "tab":
 			text := m.textarea.Value()
@@ -285,8 +285,8 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 	}
 
 	passToViewport := true
-	if km, isKey := msg.(tea.KeyMsg); isKey {
-		switch km.Type {
+	if km, isKey := msg.(tea.KeyPressMsg); isKey {
+		switch km.Code {
 		case tea.KeyPgUp, tea.KeyPgDown, tea.KeyUp, tea.KeyDown:
 			// Allow scrolling keys through.
 		default:
@@ -389,8 +389,8 @@ func (m *chatModel) setSize(w, h int) {
 	borderH := 2
 	vpHeight := h - inputHeight - headerH - helpH - borderH - 2
 
-	m.viewport.Width = w
-	m.viewport.Height = vpHeight
+	m.viewport.SetWidth(w)
+	m.viewport.SetHeight(vpHeight)
 
 	m.textarea.SetWidth(w - 4)
 	m.updateViewport()
@@ -439,7 +439,7 @@ func (m chatModel) View() string {
 		if hint != "" {
 			help = helpStyle.Render(fmt.Sprintf(" %s%s — tab to complete", m.textarea.Value(), hint))
 		} else {
-			helpText := " enter: send | shift+enter: newline | /help: commands"
+			helpText := " enter: send | shift/alt+enter: newline | /help: commands"
 			if n := len(m.pendingMessages); n > 0 {
 				helpText += fmt.Sprintf(" | %d queued", n)
 			}

@@ -4,7 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestFormatCost(t *testing.T) {
@@ -222,8 +223,11 @@ func TestPrefixLabel_UsesAlignedTrailingPadding(t *testing.T) {
 }
 
 func TestUpdateViewport_BottomAnchoring(t *testing.T) {
+	vp := viewport.New()
+	vp.SetWidth(80)
+	vp.SetHeight(20)
 	m := &chatModel{
-		viewport:  viewport.New(80, 20),
+		viewport:  vp,
 		width:     80,
 		agentName: "test",
 		messages: []chatMessage{
@@ -240,8 +244,11 @@ func TestUpdateViewport_BottomAnchoring(t *testing.T) {
 }
 
 func TestUpdateViewport_IndentsWrappedContentAfterPrefix(t *testing.T) {
+	vp := viewport.New()
+	vp.SetWidth(20)
+	vp.SetHeight(20)
 	m := &chatModel{
-		viewport:  viewport.New(20, 20),
+		viewport:  vp,
 		width:     20,
 		agentName: "main",
 		messages: []chatMessage{
@@ -251,7 +258,7 @@ func TestUpdateViewport_IndentsWrappedContentAfterPrefix(t *testing.T) {
 	}
 
 	m.updateViewport()
-	view := m.viewport.View()
+	view := ansi.Strip(m.viewport.View())
 
 	if !strings.Contains(view, "You:  alpha beta") {
 		t.Fatalf("expected first user line with prefix, got %q", view)

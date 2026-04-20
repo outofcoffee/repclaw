@@ -3,7 +3,7 @@ package tui
 import (
 	"context"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/outofcoffee/repclaw/internal/client"
 )
@@ -125,12 +125,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m AppModel) View() string {
+func (m AppModel) View() tea.View {
+	var v tea.View
 	switch m.state {
 	case viewSelect:
-		return m.selectModel.View()
+		v = tea.NewView(m.selectModel.View())
 	case viewChat:
-		return m.chatModel.View()
+		v = tea.NewView(m.chatModel.View())
+	default:
+		v = tea.NewView("")
 	}
-	return ""
+	v.AltScreen = true
+	v.KeyboardEnhancements.ReportEventTypes = true
+	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+	return v
 }

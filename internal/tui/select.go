@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/a3tai/openclaw-go/protocol"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/outofcoffee/repclaw/internal/client"
 )
@@ -50,7 +50,7 @@ func (d agentDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	var str string
 	if index == m.Index() {
 		str = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#7D56F4", Dark: "#AD8CFF"}).
+			Foreground(accent).
 			Bold(true).
 			Render(fmt.Sprintf("> %s", name))
 	} else {

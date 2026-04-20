@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/a3tai/openclaw-go/protocol"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestSelectModel_AutoSelectSingleAgent(t *testing.T) {
@@ -81,7 +81,7 @@ func TestSelectModel_CreateFormActivation(t *testing.T) {
 	// Simulate agents loaded so the list is ready.
 	m.loading = false
 
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'n'})
 
 	if m.subState != subStateCreate {
 		t.Error("expected subState to be subStateCreate after pressing 'n'")
@@ -91,12 +91,12 @@ func TestSelectModel_CreateFormActivation(t *testing.T) {
 func TestSelectModel_CreateFormCancel(t *testing.T) {
 	m := newSelectModel(nil)
 	m.loading = false
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'n'})
 	if m.subState != subStateCreate {
 		t.Fatal("expected create form to be active")
 	}
 
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if m.subState != subStateList {
 		t.Error("expected subState to return to subStateList after Esc")
@@ -107,7 +107,7 @@ func TestSelectModel_CreateFormNotActivatedWhileLoading(t *testing.T) {
 	m := newSelectModel(nil)
 	// loading is true by default
 
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'n'})
 
 	if m.subState != subStateList {
 		t.Error("should not activate create form while loading")
@@ -159,7 +159,7 @@ func TestValidateName(t *testing.T) {
 func TestSelectModel_WorkspaceAutoSuggest(t *testing.T) {
 	m := newSelectModel(nil)
 	m.loading = false
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'n'})
 
 	// Simulate typing "test" in name field by updating the input directly.
 	m.nameInput.SetValue("test")
@@ -182,7 +182,7 @@ func TestSelectModel_WorkspaceAutoSuggest(t *testing.T) {
 func TestSelectModel_WorkspaceManualEditStopsAutoSuggest(t *testing.T) {
 	m := newSelectModel(nil)
 	m.loading = false
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'n'})
 
 	// Mark workspace as manually edited.
 	m.workspaceEdited = true

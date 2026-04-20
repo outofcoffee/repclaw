@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/a3tai/openclaw-go/protocol"
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 )
 
 // makeChatEvent builds a protocol.Event wrapping a ChatEvent payload.
@@ -38,7 +38,7 @@ func makeChatEventWithError(state, runID, errMsg string) protocol.Event {
 
 // newTestChatModel creates a minimal chatModel suitable for unit tests.
 func newTestChatModel() *chatModel {
-	vp := viewport.New(80, 20)
+	vp := viewport.New()
 	return &chatModel{
 		viewport:  vp,
 		agentName: "test",

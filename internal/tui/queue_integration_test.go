@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/a3tai/openclaw-go/protocol"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/glamour"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/glamour/v2"
 	"github.com/joho/godotenv"
 
 	"github.com/outofcoffee/repclaw/internal/client"
@@ -73,7 +73,7 @@ func newIntegrationChatModel(t *testing.T, c *client.Client) *chatModel {
 		glamour.WithWordWrap(80),
 	)
 	m := chatModel{
-		viewport:   viewport.New(80, 20),
+		viewport:   viewport.New(),
 		client:     c,
 		sessionKey: sessionKey,
 		agentName:  agentName,
