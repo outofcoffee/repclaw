@@ -10,7 +10,7 @@
 | Up arrow (empty input) | Recall last sent message for editing |
 | Tab | Complete slash command or skill name |
 | Page Up / Page Down | Scroll message history |
-| Esc | Return to agent picker (from chat) |
+| Esc | Cancel in-progress response |
 
 Alt+Enter is configured via `ta.KeyMap.InsertNewline.SetKeys("alt+enter")` in `chat.go`. Shift+Enter is not supported — `ReportAllKeysAsEscapeCodes` is disabled to preserve shifted punctuation input.
 

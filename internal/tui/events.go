@@ -195,6 +195,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 
 	case "final":
 		logEvent("  FINAL msgContent=%s", string(chatEv.Message))
+		m.runID = ""
 		finalised := false
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
@@ -227,6 +228,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 
 	case "error":
 		logEvent("  ERROR: %s", chatEv.ErrorMessage)
+		m.runID = ""
 		finalised := false
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
@@ -244,6 +246,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 
 	case "aborted":
 		logEvent("  ABORTED")
+		m.runID = ""
 		finalised := false
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]

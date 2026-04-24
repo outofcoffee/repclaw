@@ -13,6 +13,7 @@ Unrecognised slash commands fall through to a skill-name lookup. If no skill mat
 | Command | What it does |
 |---|---|
 | `/agents` | Return to the agent picker by emitting `goBackMsg{}` |
+| `/cancel` | Cancel the in-progress response (also triggered by Escape) — see [chat-ux.md](chat-ux.md) |
 | `/clear` | Wipe `m.messages` from the local display (does not affect gateway history) |
 | `/compact` | Compact the session context — see [sessions.md](sessions.md#compact-and-reset) |
 | `/config` | Open the preferences view by emitting `showConfigMsg{}` |

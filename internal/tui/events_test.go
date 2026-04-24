@@ -258,6 +258,66 @@ func TestHandleEvent_AbortedAppendsMarker(t *testing.T) {
 	}
 }
 
+func TestHandleEvent_FinalClearsRunID(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	m.runID = "run1"
+	m.messages = []chatMessage{
+		{role: "user", content: "hello"},
+		{role: "assistant", content: "response", streaming: true},
+	}
+
+	finalMsg := json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"response"}],"timestamp":123}`)
+	m.handleEvent(makeChatEvent("final", "run1", 3, finalMsg))
+
+	if m.runID != "" {
+		t.Errorf("expected runID to be cleared, got %q", m.runID)
+	}
+}
+
+func TestHandleEvent_ErrorClearsRunID(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	m.runID = "run1"
+	m.messages = []chatMessage{
+		{role: "user", content: "hello"},
+		{role: "assistant", content: "partial", streaming: true},
+	}
+
+	m.handleEvent(makeChatEventWithError("error", "run1", "something went wrong"))
+
+	if m.runID != "" {
+		t.Errorf("expected runID to be cleared, got %q", m.runID)
+	}
+}
+
+func TestHandleEvent_AbortedClearsRunID(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	m.runID = "run1"
+	m.messages = []chatMessage{
+		{role: "user", content: "hello"},
+		{role: "assistant", content: "partial", streaming: true},
+	}
+
+	m.handleEvent(makeChatEvent("aborted", "run1", 3, nil))
+
+	if m.runID != "" {
+		t.Errorf("expected runID to be cleared, got %q", m.runID)
+	}
+}
+
+func TestChatSentMsg_StoresRunID(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+
+	updated, _ := m.Update(chatSentMsg{runID: "run-42"})
+
+	if updated.runID != "run-42" {
+		t.Errorf("expected runID %q, got %q", "run-42", updated.runID)
+	}
+}
+
 func TestDrainQueue_SendsFirstPendingMessage(t *testing.T) {
 	m := newTestChatModel()
 	m.sending = true

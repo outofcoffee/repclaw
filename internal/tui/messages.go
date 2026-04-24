@@ -47,6 +47,12 @@ type historyRefreshMsg struct {
 
 // chatSentMsg is returned after a message is sent.
 type chatSentMsg struct {
+	runID string
+	err   error
+}
+
+// chatAbortMsg is returned after a cancel request is sent.
+type chatAbortMsg struct {
 	err error
 }
 
