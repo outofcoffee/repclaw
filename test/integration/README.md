@@ -17,7 +17,7 @@ while the gateway runs in Docker.
 │             │ http://host.docker.internal  │
 │             ▼                              │
 │  Ollama (Metal-accelerated on host)        │
-│  Model: qwen2.5:3b                         │
+│  Model: qwen3.5:9b                         │
 └────────────────────────────────────────────┘
 ```
 
@@ -47,7 +47,7 @@ make test-integration-teardown
 
 1. **Checks prerequisites** — Docker, Ollama, jq, Go.
 2. **Starts Ollama** if it isn't already running.
-3. **Pulls the test model** (`qwen2.5:3b` by default — fast on Apple Silicon).
+3. **Pulls the test model** (`qwen3.5:9b` by default — fast on Apple Silicon).
 4. **Starts the OpenClaw gateway** in Docker via `docker-compose.yml`.
 5. **Pairs the local device** using this flow:
    - Seeds the gateway token as the device token for the first connect.
@@ -84,11 +84,24 @@ variables are required for this to work:
 ## Choosing a different model
 
 ```bash
-MODEL=llama3.2:3b make test-integration-setup
+MODEL=qwen3.5:35b make test-integration-setup
 ```
 
-Stick to 3B models on a MacBook Air. The `qwen2.5:3b` default has decent
-tool-calling support; `llama3.2:3b` is slightly faster if you don't need that.
+| Model | Size | Notes |
+|-------|------|-------|
+| `qwen3.5:4b` | 3.4 GB | Fastest iteration |
+| `qwen3.5:9b` | 6.6 GB | **Default** — good balance on Apple Silicon |
+| `qwen3.5:27b` | 17 GB | Higher quality |
+| `qwen3.5:35b` | 24 GB | Best quality on 32 GB machines — fits with ~8 GB to spare |
+
+To switch the model permanently (not just for one setup run), update these three
+places in addition to re-running setup:
+
+1. **`test/integration/openclaw.json`** — `models.providers.ollama.models[0].id`
+   and `agents.defaults.model.primary` (use `ollama/<model>` for the routing key)
+2. **`test/integration/setup.sh`** — the `MODEL` default at the top of the file
+3. **`test/integration/state/openclaw.json`** — the live copy used by the running
+   gateway (or just re-run `make test-integration-setup` to regenerate it)
 
 ## Running specific tests
 
