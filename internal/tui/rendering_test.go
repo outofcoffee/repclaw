@@ -313,7 +313,7 @@ func TestRender_SelectView_CreateFormLabels(t *testing.T) {
 	tm := teatest.NewTestModel(t, adapter, teatest.WithInitialTermSize(120, 40))
 	defer finishProgram(t, tm)
 
-	waitForContains(t, tm.Output(), "Create new agent", "Name:", "Workspace:", "Tab: switch fields")
+	waitForContains(t, tm.Output(), "Create new agent", "Name (e.g. my-agent):", "Workspace:", "Tab: switch fields")
 }
 
 func TestRender_SelectView_ErrorStateShowsRetryHint(t *testing.T) {
