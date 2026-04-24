@@ -39,6 +39,10 @@ var (
 				BorderForeground(subtle).
 				Padding(0, 1)
 
+	// Thinking content body (reasoning blocks from the model).
+	thinkingBodyStyle = lipgloss.NewStyle().
+			Foreground(subtle)
+
 	// Status / info text.
 	statusStyle = lipgloss.NewStyle().
 			Foreground(subtle)

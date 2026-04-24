@@ -59,12 +59,17 @@ func fetchHistory(cl *client.Client, sessionKey string, renderer *glamour.TermRe
 			continue
 		}
 		var parts []string
+		var thinkingParts []string
 		for _, block := range hm.Content {
 			if block.Type == "text" && block.Text != "" {
 				parts = append(parts, block.Text)
 			}
+			if block.Type == "thinking" && block.Text != "" {
+				thinkingParts = append(thinkingParts, block.Text)
+			}
 		}
 		text := strings.Join(parts, "\n")
+		thinking := strings.Join(thinkingParts, "\n")
 		if text == "" {
 			continue
 		}
@@ -81,7 +86,7 @@ func fetchHistory(cl *client.Client, sessionKey string, renderer *glamour.TermRe
 				rendered = true
 			}
 		}
-		msgs = append(msgs, chatMessage{role: role, content: text, rendered: rendered})
+		msgs = append(msgs, chatMessage{role: role, content: text, thinking: thinking, rendered: rendered})
 	}
 	return msgs, nil
 }

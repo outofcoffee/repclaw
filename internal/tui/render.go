@@ -37,16 +37,26 @@ func (m *chatModel) updateViewport() {
 			if msg.errMsg != "" {
 				body := wordWrap(msg.errMsg, wrapWidth)
 				b.WriteString(errorStyle.Render(indentMultiline(body, prefixIndent)))
-			} else if msg.streaming {
-				body := wordWrap(msg.content, wrapWidth)
-				b.WriteString(indentMultiline(body, prefixIndent))
-				b.WriteString(cursorStyle.Render(spinnerFrames[m.spinnerFrame%len(spinnerFrames)]))
-			} else if msg.rendered {
-				// Glamour-rendered content is already wrapped and contains ANSI codes.
-				b.WriteString(indentMultiline(msg.content, prefixIndent))
 			} else {
-				body := wordWrap(msg.content, wrapWidth)
-				b.WriteString(indentMultiline(body, prefixIndent))
+				if msg.thinking != "" {
+					b.WriteString(statusStyle.Render("◦ thinking"))
+					b.WriteString("\n")
+					thinkingBody := wordWrap(msg.thinking, wrapWidth)
+					b.WriteString(thinkingBodyStyle.Render(indentMultiline(thinkingBody, prefixIndent)))
+					b.WriteString("\n\n")
+					b.WriteString(prefixIndent)
+				}
+				if msg.streaming {
+					body := wordWrap(msg.content, wrapWidth)
+					b.WriteString(indentMultiline(body, prefixIndent))
+					b.WriteString(cursorStyle.Render(spinnerFrames[m.spinnerFrame%len(spinnerFrames)]))
+				} else if msg.rendered {
+					// Glamour-rendered content is already wrapped and contains ANSI codes.
+					b.WriteString(indentMultiline(msg.content, prefixIndent))
+				} else {
+					body := wordWrap(msg.content, wrapWidth)
+					b.WriteString(indentMultiline(body, prefixIndent))
+				}
 			}
 
 		case "system":
