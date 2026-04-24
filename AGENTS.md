@@ -71,3 +71,7 @@ Add or update tests whenever you change behaviour. Focus on core functionality â
 
 Run `make test` before committing. Pushes trigger CI; a failing test blocks review.
 
+## Documentation
+
+When you add or change commands, key bindings, event handlers, or user-visible behaviour, update the relevant file(s) in the `docs/` directory. The docs listed in [Developer docs](#developer-docs) are the canonical reference for each subsystem â€” keep them in sync with the code.
+
