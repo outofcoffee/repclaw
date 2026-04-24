@@ -150,7 +150,7 @@ func validateName(s string) string {
 	return ""
 }
 
-func (m *selectModel) initCreateForm() {
+func (m *selectModel) initCreateForm() tea.Cmd {
 	m.subState = subStateCreate
 	m.focusedField = 0
 	m.creating = false
@@ -159,25 +159,25 @@ func (m *selectModel) initCreateForm() {
 	m.nameValidMsg = "Required"
 
 	m.nameInput = textinput.New()
-	m.nameInput.Placeholder = "my-agent"
 	m.nameInput.CharLimit = 64
-	m.nameInput.Focus()
+	cmd := m.nameInput.Focus()
 
 	m.workInput = textinput.New()
 	m.workInput.Placeholder = "~/.openclaw/workspaces/my-agent"
 	m.workInput.CharLimit = 256
+
+	return cmd
 }
 
-func (m *selectModel) switchFocus() {
+func (m *selectModel) switchFocus() tea.Cmd {
 	if m.focusedField == 0 {
 		m.focusedField = 1
 		m.nameInput.Blur()
-		m.workInput.Focus()
-	} else {
-		m.focusedField = 0
-		m.workInput.Blur()
-		m.nameInput.Focus()
+		return m.workInput.Focus()
 	}
+	m.focusedField = 0
+	m.workInput.Blur()
+	return m.nameInput.Focus()
 }
 
 func (m selectModel) Update(msg tea.Msg) (selectModel, tea.Cmd) {
@@ -259,8 +259,8 @@ func (m selectModel) handleKey(msg tea.KeyPressMsg) (selectModel, tea.Cmd) {
 		}
 	case "n":
 		if !m.loading && m.err == nil {
-			m.initCreateForm()
-			return m, nil
+			cmd := m.initCreateForm()
+			return m, cmd
 		}
 	case "r":
 		if m.err != nil {
@@ -282,8 +282,7 @@ func (m selectModel) handleCreateKey(msg tea.KeyPressMsg) (selectModel, tea.Cmd)
 		return m, nil
 
 	case "tab", "shift+tab":
-		m.switchFocus()
-		return m, nil
+		return m, m.switchFocus()
 
 	case "enter":
 		if m.creating {
@@ -367,7 +366,7 @@ func (m selectModel) viewCreateForm() string {
 	b.WriteString(headerStyle.Render(" Create new agent "))
 	b.WriteString("\n\n")
 
-	b.WriteString("  Name:\n")
+	b.WriteString("  Name (e.g. my-agent):\n")
 	b.WriteString("  " + m.nameInput.View() + "\n")
 	if m.nameValidMsg != "" && m.nameInput.Value() != "" {
 		b.WriteString("  " + errorStyle.Render(m.nameValidMsg) + "\n")
