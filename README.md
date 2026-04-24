@@ -1,14 +1,20 @@
-# lucinate
+<p align="center">
+  <img src="docs/hero.png" alt="lucinate" width="600" />
+</p>
 
-The terminal client for [OpenClaw](https://github.com/openclaw/openclaw).
+<h1 align="center">lucinate — the terminal-native AI chat client</h1>
 
-[![CI](https://github.com/lucinate-ai/lucinate/actions/workflows/ci.yml/badge.svg)](https://github.com/lucinate-ai/lucinate/actions/workflows/ci.yml)
+<p align="center">
+  Chat with your <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agents from the terminal. Streaming responses, markdown rendering, no mouse required.
+</p>
 
-![lucinate demo](docs/demo.gif)
+<p align="center">
+  <a href="https://github.com/lucinate-ai/lucinate/actions/workflows/ci.yml"><img src="https://github.com/lucinate-ai/lucinate/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+</p>
 
-## What it does
-
-lucinate is the terminal-native client for OpenClaw. Connect to your gateway, pick an agent, and start chatting. Responses stream in live, messages render as markdown, and you never need to reach for the mouse.
+<p align="center">
+  <img src="docs/demo.gif" alt="lucinate demo" width="600" />
+</p>
 
 No file browsers, no task boards, no dashboards. Just chat.
 
@@ -169,3 +175,7 @@ Device identity (Ed25519 keypair) is stored at `~/.openclaw-go/identity/` and sh
 ## License
 
 Apache 2.0
+
+---
+
+<sub>OpenClaw is a trademark of its respective owner(s), including Peter Steinberger. This site is not affiliated with, endorsed by, or sponsored by OpenClaw or its contributors.</sub>
