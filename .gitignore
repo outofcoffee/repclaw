@@ -22,3 +22,9 @@ dist/
 
 # Agents
 .claude/*.local.json
+
+# Integration test worktrees
+.claude/worktrees/
+
+# Integration test state
+test/integration/state/
