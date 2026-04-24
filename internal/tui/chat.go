@@ -73,7 +73,7 @@ func (m *chatModel) hasStreamingMessage() bool {
 func (m *chatModel) removeThinkingPlaceholder() {
 	if len(m.messages) > 0 {
 		last := &m.messages[len(m.messages)-1]
-		if last.role == "assistant" && last.streaming && last.content == "" {
+		if last.role == "assistant" && last.streaming && last.awaitingDelta {
 			m.messages = m.messages[:len(m.messages)-1]
 		}
 	}
@@ -371,7 +371,7 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			}
 
 			m.messages = append(m.messages, chatMessage{role: "user", content: text})
-			m.messages = append(m.messages, chatMessage{role: "assistant", streaming: true})
+			m.messages = append(m.messages, chatMessage{role: "assistant", streaming: true, awaitingDelta: true})
 			m.sending = true
 			m.updateViewport()
 			cmds = append(cmds, m.sendMessage(m.withSkillCatalog(text)), m.ensureSpinnerTicking())
@@ -547,7 +547,7 @@ func (m *chatModel) drainQueueOpt(refresh bool) tea.Cmd {
 	}
 
 	m.messages = append(m.messages, chatMessage{role: "user", content: text})
-	m.messages = append(m.messages, chatMessage{role: "assistant", streaming: true})
+	m.messages = append(m.messages, chatMessage{role: "assistant", streaming: true, awaitingDelta: true})
 	m.updateViewport()
 	return tea.Batch(m.sendMessage(text), m.ensureSpinnerTicking())
 }

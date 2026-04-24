@@ -21,6 +21,25 @@ type chatContentBlock struct {
 	Text string `json:"text"`
 }
 
+// extractThinkingFromMessage parses the Message field and extracts thinking blocks.
+// Only final events carry structured content blocks; delta events are plain strings.
+func extractThinkingFromMessage(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var msg chatFinalMessage
+	if json.Unmarshal(raw, &msg) != nil {
+		return ""
+	}
+	var parts []string
+	for _, block := range msg.Content {
+		if block.Type == "thinking" && block.Text != "" {
+			parts = append(parts, block.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // extractTextFromMessage parses the Message field and extracts readable text.
 // Delta events send a plain JSON string; final events send a structured object.
 func extractTextFromMessage(raw json.RawMessage) string {
@@ -151,6 +170,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			if last.role == "assistant" && last.streaming {
 				// Deltas are cumulative — each one contains the full text so far.
 				last.content = deltaText
+				last.awaitingDelta = false
 				m.updateViewport()
 				return nil
 			}
@@ -172,10 +192,11 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		finalised := false
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
-			if last.role == "assistant" && last.streaming {
+			if last.role == "assistant" && last.streaming && !last.awaitingDelta {
 				last.streaming = false
+				last.thinking = extractThinkingFromMessage(chatEv.Message)
 				finalised = true
-				logEvent("  FINALISED — refreshing history")
+				logEvent("  FINALISED — refreshing history thinking_len=%d", len(last.thinking))
 			}
 		}
 		m.updateViewport()

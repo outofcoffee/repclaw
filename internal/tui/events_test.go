@@ -282,8 +282,8 @@ func TestDrainQueue_SendsFirstPendingMessage(t *testing.T) {
 		t.Errorf("expected second-to-last message to be user 'msg1', got %s %q", userMsg.role, userMsg.content)
 	}
 	placeholder := m.messages[n-1]
-	if placeholder.role != "assistant" || !placeholder.streaming || placeholder.content != "" {
-		t.Errorf("expected thinking placeholder (assistant streaming empty), got %s %q streaming=%v", placeholder.role, placeholder.content, placeholder.streaming)
+	if placeholder.role != "assistant" || !placeholder.streaming || !placeholder.awaitingDelta {
+		t.Errorf("expected thinking placeholder (assistant streaming awaitingDelta), got %s streaming=%v awaitingDelta=%v", placeholder.role, placeholder.streaming, placeholder.awaitingDelta)
 	}
 }
 
@@ -341,22 +341,27 @@ func TestFinalEvent_EmptyAckDoesNotDrain(t *testing.T) {
 	m := newTestChatModel()
 	m.sending = true
 	m.pendingMessages = []string{"queued"}
+	// Reflect real runtime state: a spinner placeholder is present but no delta has arrived.
 	m.messages = []chatMessage{
 		{role: "user", content: "hello"},
+		{role: "assistant", streaming: true, awaitingDelta: true},
 	}
 
-	// An empty final with no streaming assistant message (gateway ack).
+	// An early final ack from the gateway, arriving before any delta.
 	finalMsg := json.RawMessage(`{"role":"assistant","content":[],"timestamp":123}`)
 	cmd := m.handleEvent(makeChatEvent("final", "run1", 1, finalMsg))
 
 	if cmd != nil {
-		t.Error("expected nil cmd for empty ack final")
+		t.Error("expected nil cmd — placeholder should not be treated as a finalised response")
 	}
 	if len(m.pendingMessages) != 1 {
 		t.Errorf("queue should be unchanged, got %d pending", len(m.pendingMessages))
 	}
 	if !m.sending {
 		t.Error("sending should remain true — ack should not reset it")
+	}
+	if !m.messages[1].streaming {
+		t.Error("placeholder should remain streaming")
 	}
 }
 
@@ -388,8 +393,8 @@ func TestFinalEvent_DrainAfterStreamingResponse(t *testing.T) {
 		t.Errorf("expected dequeued user message at second-to-last, got %s %q", userMsg.role, userMsg.content)
 	}
 	placeholder := m.messages[n-1]
-	if placeholder.role != "assistant" || !placeholder.streaming || placeholder.content != "" {
-		t.Errorf("expected thinking placeholder (assistant streaming empty), got %s %q streaming=%v", placeholder.role, placeholder.content, placeholder.streaming)
+	if placeholder.role != "assistant" || !placeholder.streaming || !placeholder.awaitingDelta {
+		t.Errorf("expected thinking placeholder (assistant streaming awaitingDelta), got %s streaming=%v awaitingDelta=%v", placeholder.role, placeholder.streaming, placeholder.awaitingDelta)
 	}
 }
 
