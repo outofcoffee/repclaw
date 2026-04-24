@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 )
 
 func newSlashTestModel() *chatModel {
@@ -301,7 +302,7 @@ func TestCompleteSlashCommand(t *testing.T) {
 		{"/he", "/help"},
 		{"/help", "/help"},
 		{"/q", "/quit"},
-		{"/c", "/clear"},
+		{"/c", "/cancel"},
 		{"/e", "/exit"},
 		{"/a", "/agents"},
 		{"/agents", "/agents"},
@@ -435,6 +436,103 @@ func TestSlashCommand_Help_IncludesNewCommands(t *testing.T) {
 		if !strings.Contains(last.content, want) {
 			t.Errorf("/help text missing %q\ngot: %s", want, last.content)
 		}
+	}
+}
+
+func TestSlashCommand_Cancel_WhileSending(t *testing.T) {
+	m := newSlashTestModel()
+	m.sending = true
+	m.runID = "run-1"
+	m.pendingMessages = []string{"queued msg"}
+
+	handled, cmd := m.handleSlashCommand("/cancel")
+	if !handled {
+		t.Fatal("expected /cancel to be handled")
+	}
+	if cmd == nil {
+		t.Fatal("expected a cmd from /cancel while sending")
+	}
+	if len(m.pendingMessages) != 0 {
+		t.Errorf("expected pending queue to be cleared, got %d", len(m.pendingMessages))
+	}
+}
+
+func TestSlashCommand_Cancel_WhileIdle(t *testing.T) {
+	m := newSlashTestModel()
+	m.sending = false
+	initialCount := len(m.messages)
+
+	handled, cmd := m.handleSlashCommand("/cancel")
+	if !handled {
+		t.Fatal("expected /cancel to be handled")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd from /cancel when not sending")
+	}
+	if len(m.messages) != initialCount+1 {
+		t.Fatalf("expected %d messages, got %d", initialCount+1, len(m.messages))
+	}
+	last := m.messages[len(m.messages)-1]
+	if last.role != "system" || last.content != "Nothing to cancel." {
+		t.Errorf("unexpected message: role=%q content=%q", last.role, last.content)
+	}
+}
+
+func TestSlashCommand_Cancel_NoRunID(t *testing.T) {
+	m := newSlashTestModel()
+	m.sending = true
+	m.runID = "" // sending but no runID yet
+
+	handled, cmd := m.handleSlashCommand("/cancel")
+	if !handled {
+		t.Fatal("expected /cancel to be handled")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd when sending but no runID")
+	}
+	last := m.messages[len(m.messages)-1]
+	if last.content != "Nothing to cancel." {
+		t.Errorf("expected 'Nothing to cancel.', got %q", last.content)
+	}
+}
+
+func TestSlashCommand_Help_IncludesCancel(t *testing.T) {
+	m := newSlashTestModel()
+	m.handleSlashCommand("/help")
+	last := m.messages[len(m.messages)-1]
+	if !strings.Contains(last.content, "/cancel") {
+		t.Errorf("/help text missing /cancel\ngot: %s", last.content)
+	}
+}
+
+func TestEscKey_WhileSending_CancelsTurn(t *testing.T) {
+	m := newSlashTestModel()
+	m.sending = true
+	m.runID = "run-1"
+	m.pendingMessages = []string{"queued"}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	if cmd == nil {
+		t.Fatal("expected a cmd from Escape while sending")
+	}
+	if len(updated.pendingMessages) != 0 {
+		t.Errorf("expected pending queue to be cleared, got %d", len(updated.pendingMessages))
+	}
+}
+
+func TestEscKey_WhileIdle_NoOp(t *testing.T) {
+	m := newSlashTestModel()
+	m.sending = false
+	initialCount := len(m.messages)
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	if cmd != nil {
+		t.Error("expected nil cmd from Escape when not sending")
+	}
+	if len(updated.messages) != initialCount {
+		t.Errorf("expected no new messages, got %d (was %d)", len(updated.messages), initialCount)
 	}
 }
 

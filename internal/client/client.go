@@ -224,6 +224,14 @@ func (c *Client) ExecResolve(ctx context.Context, id, decision string) (*protoco
 	})
 }
 
+// ChatAbort aborts a running chat turn.
+func (c *Client) ChatAbort(ctx context.Context, sessionKey, runID string) error {
+	return c.gw.ChatAbort(ctx, protocol.ChatAbortParams{
+		SessionKey: sessionKey,
+		RunID:      runID,
+	})
+}
+
 // SessionCompact compacts (summarises) the session context.
 func (c *Client) SessionCompact(ctx context.Context, sessionKey string) error {
 	return c.gw.SessionsCompact(ctx, protocol.SessionsCompactParams{Key: sessionKey})

@@ -36,6 +36,7 @@ type chatModel struct {
 	agentID          string
 	agentName        string
 	sending          bool
+	runID            string // active run ID for cancellation
 	pendingMessages  []string
 	width            int
 	height           int
@@ -294,6 +295,11 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 	case tea.KeyPressMsg:
 		logEvent("KEY code=%d mod=%v string=%q", msg.Code, msg.Mod, msg.String())
 		switch msg.String() {
+		case "esc":
+			if m.sending {
+				return m, m.cancelTurn()
+			}
+			return m, nil
 		case "tab":
 			text := m.textarea.Value()
 			if strings.HasPrefix(text, "/") && !strings.Contains(text, " ") {
@@ -440,6 +446,13 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			cmd := m.drainQueue()
 			return m, cmd
 		}
+		m.runID = msg.runID
+		return m, nil
+
+	case chatAbortMsg:
+		if msg.err != nil {
+			logEvent("ABORT_ERROR: %v", msg.err)
+		}
 		return m, nil
 
 	case GatewayEventMsg:
@@ -491,8 +504,40 @@ func (m *chatModel) sendMessage(text string) tea.Cmd {
 	sessionKey := m.sessionKey
 	return func() tea.Msg {
 		idemKey := fmt.Sprintf("lucinate-%d", time.Now().UnixNano())
-		_, err := m.client.ChatSend(context.Background(), sessionKey, text, idemKey)
-		return chatSentMsg{err: err}
+		result, err := m.client.ChatSend(context.Background(), sessionKey, text, idemKey)
+		if err != nil {
+			return chatSentMsg{err: err}
+		}
+		return chatSentMsg{runID: result.RunID}
+	}
+}
+
+// cancelTurn aborts the active turn and clears pending messages.
+func (m *chatModel) cancelTurn() tea.Cmd {
+	if !m.sending || m.runID == "" {
+		m.messages = append(m.messages, chatMessage{role: "system", content: "Nothing to cancel."})
+		m.updateViewport()
+		return nil
+	}
+	cl := m.client
+	sessionKey := m.sessionKey
+	runID := m.runID
+	m.pendingMessages = nil
+	m.runID = ""
+	m.sending = false
+	// Stop streaming immediately so the spinner stops.
+	if len(m.messages) > 0 {
+		last := &m.messages[len(m.messages)-1]
+		if last.role == "assistant" && last.streaming {
+			last.streaming = false
+			last.content += "\n[aborted]"
+		}
+	}
+	m.messages = append(m.messages, chatMessage{role: "system", content: "Cancelled."})
+	m.updateViewport()
+	return func() tea.Msg {
+		err := cl.ChatAbort(context.Background(), sessionKey, runID)
+		return chatAbortMsg{err: err}
 	}
 }
 

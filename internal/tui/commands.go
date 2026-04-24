@@ -19,7 +19,7 @@ type pendingConfirmation struct {
 }
 
 // slashCommands is the list of available slash commands for autocomplete.
-var slashCommands = []string{"/agents", "/clear", "/commands", "/compact", "/config", "/exit", "/help", "/model", "/quit", "/reset", "/sessions", "/skills", "/stats", "/status", "/think"}
+var slashCommands = []string{"/agents", "/cancel", "/clear", "/commands", "/compact", "/config", "/exit", "/help", "/model", "/quit", "/reset", "/sessions", "/skills", "/stats", "/status", "/think"}
 
 // thinkingLevels is the ordered list of valid thinking levels.
 var thinkingLevels = []string{"off", "minimal", "low", "medium", "high"}
@@ -68,6 +68,8 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 		return true, tea.Quit
 	case "/agents":
 		return true, func() tea.Msg { return goBackMsg{} }
+	case "/cancel":
+		return true, m.cancelTurn()
 	case "/clear":
 		m.messages = nil
 		m.updateViewport()
@@ -132,7 +134,7 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 			}
 		}
 	case "/help", "/commands":
-		helpText := "/quit, /exit — quit lucinate\n/agents — return to agent picker\n/clear — clear chat display\n/compact — compact session context\n/config — open preferences\n/model — list available models\n/model <name> — switch model\n/reset — delete session and start fresh\n/sessions — browse and restore previous sessions\n/stats — show session statistics\n/status — show gateway health and agent status\n/skills — list available agent skills\n/think — show current thinking level\n/think <level> — set thinking level (off/minimal/low/medium/high)\n/help — show this help\n\n!<command> — run command locally\n!!<command> — run command on gateway host"
+		helpText := "/quit, /exit — quit lucinate\n/agents — return to agent picker\n/cancel — cancel the current response (also: Esc)\n/clear — clear chat display\n/compact — compact session context\n/config — open preferences\n/model — list available models\n/model <name> — switch model\n/reset — delete session and start fresh\n/sessions — browse and restore previous sessions\n/stats — show session statistics\n/status — show gateway health and agent status\n/skills — list available agent skills\n/think — show current thinking level\n/think <level> — set thinking level (off/minimal/low/medium/high)\n/help — show this help\n\n!<command> — run command locally\n!!<command> — run command on gateway host"
 		if len(m.skills) > 0 {
 			helpText += fmt.Sprintf("\n\n%d agent skill(s) available — type /skills to list", len(m.skills))
 		}
