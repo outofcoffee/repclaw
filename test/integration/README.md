@@ -17,7 +17,7 @@ while the gateway runs in Docker.
 │             │ http://host.docker.internal  │
 │             ▼                              │
 │  Ollama (Metal-accelerated on host)        │
-│  Model: qwen3.5:9b                         │
+│  Model: qwen3.5:4b                         │
 └────────────────────────────────────────────┘
 ```
 
@@ -47,7 +47,7 @@ make test-integration-teardown
 
 1. **Checks prerequisites** — Docker, Ollama, jq, Go.
 2. **Starts Ollama** if it isn't already running.
-3. **Pulls the test model** (`qwen3.5:9b` by default — fast on Apple Silicon).
+3. **Pulls the test model** (`qwen3.5:4b` by default — fast on Apple Silicon).
 4. **Starts the OpenClaw gateway** in Docker via `docker-compose.yml`.
 5. **Pairs the local device** using this flow:
    - Seeds the gateway token as the device token for the first connect.
@@ -89,8 +89,8 @@ MODEL=qwen3.5:35b make test-integration-setup
 
 | Model | Size | Notes |
 |-------|------|-------|
-| `qwen3.5:4b` | 3.4 GB | Fastest iteration |
-| `qwen3.5:9b` | 6.6 GB | **Default** — good balance on Apple Silicon |
+| `qwen3.5:4b` | 3.4 GB | **Default** — fast local inference |
+| `qwen3.5:9b` | 6.6 GB | Good balance on Apple Silicon |
 | `qwen3.5:27b` | 17 GB | Higher quality |
 | `qwen3.5:35b` | 24 GB | Best quality on 32 GB machines — fits with ~8 GB to spare |
 

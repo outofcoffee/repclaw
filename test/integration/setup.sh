@@ -21,7 +21,7 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 IDENTITY_DIR="$HOME/.openclaw-go/identity"
 BACKUP_FILE="$IDENTITY_DIR/device-token.backup"
 
-MODEL="${MODEL:-qwen3.5:9b}"
+MODEL="${MODEL:-qwen3.5:4b}"
 GATEWAY_URL="http://localhost:18789"
 GATEWAY_WS_URL="ws://127.0.0.1:18789/ws"
 HEALTH_TIMEOUT=60
