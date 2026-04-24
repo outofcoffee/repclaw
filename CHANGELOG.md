@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.17.0] - 2026-04-24
+### Added
+- feat: style pending messages as dim italic shadows (#54)
+
+### Changed
+- chore: apply project name
+- docs: add maintainer documentation for all major subsystems (#53)
+
+### Fixed
+- fix: prevent placeholder 'm' appearing in new agent name field (#57)
+- fix: prevent queued messages being dropped on early gateway ack
+
 ## [0.16.0] - 2026-04-24
 ### Added
 - feat: add thinking level controls via /think command
