@@ -11,7 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
-IDENTITY_DIR="$HOME/.openclaw-go/identity"
+IDENTITY_DIR="$HOME/.lucinate/identity/localhost_18789"
 BACKUP_FILE="$IDENTITY_DIR/device-token.backup"
 
 info()  { printf "\033[1;34m==>\033[0m %s\n" "$*"; }

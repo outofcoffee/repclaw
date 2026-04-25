@@ -141,7 +141,7 @@ re-run `make test-integration-setup-bedrock`.
    - Verifies the connection with the new device token.
 5. **Writes `.env`** with `OPENCLAW_GATEWAY_URL=http://localhost:18789`.
 
-After setup, the device identity at `~/.openclaw-go/identity/` is paired with
+After setup, the device identity at `~/.lucinate/identity/localhost_18789/` is paired with
 the test gateway. If you had an existing device token (from a production
 gateway), it is backed up to `device-token.backup` and restored on teardown.
 
@@ -206,7 +206,7 @@ docker compose -f "$COMPOSE" exec -T gateway \
     --json --token "$GW_TOKEN" --url "$GW_URL"
 
 # 4. Save the returned .token value
-echo -n "<token>" > ~/.openclaw-go/identity/device-token
+echo -n "<token>" > ~/.lucinate/identity/localhost_18789/device-token
 ```
 
 ### Ollama not reachable from Docker
