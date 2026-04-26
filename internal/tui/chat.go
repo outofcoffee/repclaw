@@ -114,6 +114,7 @@ type chatModel struct {
 	historyLimit     int
 	thinkingLevel    string // current thinking level; "" means not set / using gateway default
 	connState        ConnStateMsg
+	hideInput        bool // when true, the textarea + help line are not rendered; the textarea model still receives input bytes
 }
 
 func spinnerTickCmd() tea.Cmd {
@@ -152,7 +153,7 @@ func (m *chatModel) ensureSpinnerTicking() tea.Cmd {
 	return spinnerTickCmd()
 }
 
-func newChatModel(c *client.Client, sessionKey, agentID, agentName, modelID string, prefs config.Preferences) chatModel {
+func newChatModel(c *client.Client, sessionKey, agentID, agentName, modelID string, prefs config.Preferences, hideInput bool) chatModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -182,6 +183,7 @@ func newChatModel(c *client.Client, sessionKey, agentID, agentName, modelID stri
 		modelID:      modelID,
 		prefs:        prefs,
 		historyLimit: prefs.HistoryLimit,
+		hideInput:    hideInput,
 	}
 }
 
@@ -711,6 +713,9 @@ func (m *chatModel) setSize(w, h int) {
 	helpH := 1
 	borderH := 2
 	vpHeight := h - inputHeight - headerH - helpH - borderH - 2
+	if m.hideInput {
+		vpHeight = h - headerH - 2
+	}
 
 	m.viewport.SetWidth(w)
 	m.viewport.SetHeight(vpHeight)
@@ -750,6 +755,14 @@ func (m chatModel) View() string {
 	header := headerStyle.
 		Width(m.width).
 		Render(title)
+
+	if m.hideInput {
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			header,
+			m.viewport.View(),
+		)
+	}
 
 	borderStyle := inputBorderStyle
 	isRemoteExec := strings.HasPrefix(m.textarea.Value(), "!!")

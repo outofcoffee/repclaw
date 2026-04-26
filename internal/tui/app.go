@@ -18,6 +18,14 @@ const (
 	viewConfig
 )
 
+// AppOptions configures an AppModel. Embedders that drive the program from
+// a platform-native input surface (so the in-TUI textarea would be
+// duplicate UI) set HideInputArea; see app.RunOptions for the full
+// rationale.
+type AppOptions struct {
+	HideInputArea bool
+}
+
 // AppModel is the root bubbletea model.
 type AppModel struct {
 	state         viewState
@@ -29,15 +37,17 @@ type AppModel struct {
 	prefs         config.Preferences
 	width         int
 	height        int
+	hideInput     bool
 }
 
 // NewApp creates the root application model.
-func NewApp(c *client.Client) AppModel {
+func NewApp(c *client.Client, opts AppOptions) AppModel {
 	return AppModel{
 		state:       viewSelect,
 		selectModel: newSelectModel(c),
 		client:      c,
 		prefs:       config.LoadPreferences(),
+		hideInput:   opts.HideInputArea,
 	}
 }
 
@@ -92,7 +102,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.sessionsModel.Init()
 
 	case sessionSelectedMsg:
-		m.chatModel = newChatModel(m.client, msg.sessionKey, m.sessionsModel.agentID, msg.agentName, msg.modelID, m.prefs)
+		m.chatModel = newChatModel(m.client, msg.sessionKey, m.sessionsModel.agentID, msg.agentName, msg.modelID, m.prefs, m.hideInput)
 		m.chatModel.setSize(m.width, m.height)
 		m.state = viewChat
 		return m, m.chatModel.Init()
@@ -103,7 +113,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionsModel.loading = false
 			return m, nil
 		}
-		m.chatModel = newChatModel(m.client, msg.sessionKey, m.sessionsModel.agentID, msg.agentName, msg.modelID, m.prefs)
+		m.chatModel = newChatModel(m.client, msg.sessionKey, m.sessionsModel.agentID, msg.agentName, msg.modelID, m.prefs, m.hideInput)
 		m.chatModel.setSize(m.width, m.height)
 		m.state = viewChat
 		return m, m.chatModel.Init()
@@ -118,7 +128,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = viewSelect
 			return m, nil
 		}
-		m.chatModel = newChatModel(m.client, msg.sessionKey, msg.agentID, msg.agentName, msg.modelID, m.prefs)
+		m.chatModel = newChatModel(m.client, msg.sessionKey, msg.agentID, msg.agentName, msg.modelID, m.prefs, m.hideInput)
 		m.chatModel.setSize(m.width, m.height)
 		m.state = viewChat
 		return m, m.chatModel.Init()

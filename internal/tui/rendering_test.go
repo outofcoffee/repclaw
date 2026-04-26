@@ -74,7 +74,7 @@ func (a selectModelAdapter) View() tea.View {
 // rendering tests, wrapped in an adapter.
 func newRenderingChatModel(t *testing.T, agentName string) chatModelAdapter {
 	t.Helper()
-	m := newChatModel(nil, "session-key", "", agentName, "", config.DefaultPreferences())
+	m := newChatModel(nil, "session-key", "", agentName, "", config.DefaultPreferences(), false)
 	m.setSize(120, 40)
 	return chatModelAdapter{inner: m}
 }

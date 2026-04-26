@@ -44,6 +44,17 @@ type RunOptions struct {
 	// screen until the next full repaint.
 	InitialCols int
 	InitialRows int
+
+	// HideInputArea suppresses the chat view's textarea and help line so
+	// the embedder can supply its own input surface (for example, a
+	// platform-native text field whose typed bytes are written into
+	// Input). The underlying textarea model is still updated by the
+	// incoming byte stream so command parsing, history, and Enter-to-send
+	// behave exactly as in the CLI; only its rendering and the help line
+	// below it are skipped, and the chat viewport reclaims the freed
+	// rows. The CLI never needs this; embedders without a separate input
+	// surface should leave it false.
+	HideInputArea bool
 }
 
 // Program wraps a Bubble Tea program with the lucinate model and a
@@ -69,7 +80,7 @@ func New(opts RunOptions) (*Program, error) {
 		out = os.Stdout
 	}
 
-	model := tui.NewApp(opts.Client)
+	model := tui.NewApp(opts.Client, tui.AppOptions{HideInputArea: opts.HideInputArea})
 	teaOpts := []tea.ProgramOption{
 		tea.WithInput(in),
 		tea.WithOutput(out),
