@@ -22,8 +22,8 @@ import (
 //
 // The default filesystem implementation is provided by the openclaw-go
 // identity package (*identity.Store satisfies this interface). Alternative
-// implementations — e.g. an iOS Keychain-backed store — can be supplied via
-// NewWithIdentityStore so the gateway client logic stays platform-agnostic.
+// implementations can be supplied via NewWithIdentityStore so the gateway
+// client logic stays decoupled from any particular storage backend.
 type IdentityStore interface {
 	LoadOrGenerate() (*identity.Identity, error)
 	LoadDeviceToken() string
@@ -59,8 +59,9 @@ func New(cfg *config.Config) (*Client, error) {
 }
 
 // NewWithIdentityStore creates a new client using a caller-supplied identity
-// store. This entry point is intended for non-CLI hosts (mobile, tests) that
-// need to persist the device keypair somewhere other than the filesystem.
+// store. This entry point lets embedders persist the device keypair somewhere
+// other than the default filesystem location (for example, in tests, or in
+// alternative host environments).
 func NewWithIdentityStore(cfg *config.Config, store IdentityStore) *Client {
 	return &Client{
 		events: make(chan protocol.Event, 256),
