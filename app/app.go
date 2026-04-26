@@ -34,6 +34,16 @@ type RunOptions struct {
 	// Output is the destination for rendered frames. If nil, os.Stdout is
 	// used.
 	Output io.Writer
+
+	// InitialCols and InitialRows seed the program with a window-size
+	// message before its first render. Embedders that drive a fixed-size
+	// virtual terminal (e.g. an in-process renderer) should set these so
+	// the first paint already fits the visible grid; otherwise Bubble Tea
+	// renders against its default size and reflows on the first
+	// post-layout WindowSizeMsg, which can leave stale characters on
+	// screen until the next full repaint.
+	InitialCols int
+	InitialRows int
 }
 
 // Program wraps a Bubble Tea program with the lucinate model and a
@@ -60,10 +70,14 @@ func New(opts RunOptions) (*Program, error) {
 	}
 
 	model := tui.NewApp(opts.Client)
-	tp := tea.NewProgram(model,
+	teaOpts := []tea.ProgramOption{
 		tea.WithInput(in),
 		tea.WithOutput(out),
-	)
+	}
+	if opts.InitialCols > 0 && opts.InitialRows > 0 {
+		teaOpts = append(teaOpts, tea.WithWindowSize(opts.InitialCols, opts.InitialRows))
+	}
+	tp := tea.NewProgram(model, teaOpts...)
 	return &Program{tp: tp, client: opts.Client}, nil
 }
 
