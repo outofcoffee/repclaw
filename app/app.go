@@ -3,7 +3,9 @@
 // The CLI entry point in main.go is a thin wrapper around Run; embedders
 // that need to host the program with their own input source or output sink
 // (for example, tests or alternative front-ends) construct a *client.Client,
-// connect it, and then call Run with a RunOptions value.
+// connect it, and then either call Run for a one-shot blocking invocation
+// or build a *Program directly when they need to send window-size updates
+// or request a quit from another goroutine.
 package app
 
 import (
@@ -19,10 +21,10 @@ import (
 	"github.com/lucinate-ai/lucinate/internal/tui"
 )
 
-// RunOptions configures a single Run invocation.
+// RunOptions configures a Program.
 type RunOptions struct {
 	// Client is the already-connected gateway client whose events drive the
-	// UI. Run does not call Connect or Close on the client; lifecycle is the
+	// UI. Neither Run nor Program closes the client; lifecycle is the
 	// caller's responsibility.
 	Client *client.Client
 
@@ -34,16 +36,19 @@ type RunOptions struct {
 	Output io.Writer
 }
 
-// Run starts the Bubble Tea program and blocks until it exits or ctx is
-// cancelled. The events-pump goroutine that bridges gateway events into the
-// program is owned by Run and stops when the program exits or ctx is
-// cancelled, whichever comes first.
-//
-// Run never closes the client; the caller is expected to Close it after Run
-// returns.
-func Run(ctx context.Context, opts RunOptions) error {
+// Program wraps a Bubble Tea program with the lucinate model and a
+// gateway-events pump goroutine. It is safe to call Resize and Quit from
+// goroutines other than the one running Run.
+type Program struct {
+	tp     *tea.Program
+	client *client.Client
+}
+
+// New constructs a Program with the given options. It does not start the
+// underlying Bubble Tea loop; call Run to block on it.
+func New(opts RunOptions) (*Program, error) {
 	if opts.Client == nil {
-		return errors.New("app.Run: Client is required")
+		return nil, errors.New("app: Client is required")
 	}
 	in := opts.Input
 	if in == nil {
@@ -54,34 +59,53 @@ func Run(ctx context.Context, opts RunOptions) error {
 		out = os.Stdout
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	model := tui.NewApp(opts.Client)
-	p := tea.NewProgram(model,
-		tea.WithContext(runCtx),
+	tp := tea.NewProgram(model,
 		tea.WithInput(in),
 		tea.WithOutput(out),
 	)
+	return &Program{tp: tp, client: opts.Client}, nil
+}
+
+// Run starts the Bubble Tea program and blocks until it exits or ctx is
+// cancelled. The events-pump goroutine that bridges gateway events into the
+// program is owned by Run for the duration of the call.
+//
+// Run is single-shot per Program; calling it more than once is a programming
+// error and the second call's behaviour is undefined.
+func (p *Program) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	pumpDone := make(chan struct{})
 	go func() {
 		defer close(pumpDone)
-		events := opts.Client.Events()
+		events := p.client.Events()
 		for {
 			select {
 			case ev, ok := <-events:
 				if !ok {
 					return
 				}
-				p.Send(tui.GatewayEventMsg(ev))
+				p.tp.Send(tui.GatewayEventMsg(ev))
 			case <-runCtx.Done():
 				return
 			}
 		}
 	}()
 
-	_, err := p.Run()
+	// Quit the program if the caller cancels the context.
+	stopWatcher := make(chan struct{})
+	go func() {
+		select {
+		case <-runCtx.Done():
+			p.tp.Quit()
+		case <-stopWatcher:
+		}
+	}()
+
+	_, err := p.tp.Run()
+	close(stopWatcher)
 	cancel()
 	<-pumpDone
 
@@ -89,4 +113,27 @@ func Run(ctx context.Context, opts RunOptions) error {
 		return fmt.Errorf("program: %w", err)
 	}
 	return nil
+}
+
+// Resize sends a window-size update to the running program. Safe to call
+// from any goroutine. A no-op if the program has already exited.
+func (p *Program) Resize(cols, rows int) {
+	p.tp.Send(tea.WindowSizeMsg{Width: cols, Height: rows})
+}
+
+// Quit requests the program to exit cleanly. Safe to call from any
+// goroutine. The corresponding Run call will return shortly afterwards.
+func (p *Program) Quit() {
+	p.tp.Quit()
+}
+
+// Run is a convenience wrapper that constructs a Program and runs it to
+// completion. Embedders that need Resize or Quit should use New + Program.Run
+// instead.
+func Run(ctx context.Context, opts RunOptions) error {
+	p, err := New(opts)
+	if err != nil {
+		return err
+	}
+	return p.Run(ctx)
 }
