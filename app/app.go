@@ -166,7 +166,8 @@ func New(opts RunOptions) (*Program, error) {
 
 // Run starts the Bubble Tea program and blocks until it exits or ctx is
 // cancelled. The events-pump goroutine that bridges gateway events into the
-// program is owned by Run for the duration of the call.
+// program — and the connection supervisor that pushes reconnect state
+// transitions — are owned by Run for the duration of the call.
 //
 // Run is single-shot per Program; calling it more than once is a programming
 // error and the second call's behaviour is undefined.
@@ -190,6 +191,13 @@ func (p *Program) Run(ctx context.Context) error {
 			}
 		}
 	}()
+
+	// Watch the gateway connection and push reconnect-state transitions
+	// into the program so the chat view can surface a "lost connection /
+	// reconnecting" badge and clear stale streaming placeholders.
+	go p.client.Supervise(runCtx, func(s client.ConnState) {
+		p.tp.Send(tui.ConnStateMsg{Status: s.Status, Attempt: s.Attempt, Err: s.Err})
+	})
 
 	// Quit the program if the caller cancels the context.
 	stopWatcher := make(chan struct{})
