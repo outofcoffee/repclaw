@@ -60,17 +60,6 @@ func (m configModel) Update(msg tea.Msg) (configModel, tea.Cmd) {
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
-		case "space":
-			item := &m.items[m.cursor]
-			if item.kind == configItemBool {
-				item.checked = !item.checked
-				m.applyToPrefs()
-				prefs := m.prefs
-				return m, func() tea.Msg {
-					_ = config.SavePreferences(prefs)
-					return prefsUpdatedMsg{prefs: prefs}
-				}
-			}
 		case "left", "h":
 			item := &m.items[m.cursor]
 			if item.kind == configItemInt && item.value-item.step >= item.min {
@@ -107,16 +96,38 @@ func (m configModel) Update(msg tea.Msg) (configModel, tea.Cmd) {
 }
 
 // Actions returns the discoverable, view-level commands the config
-// view exposes. The space/←/→ controls are intentionally not actions —
-// they operate on the focused row, not the screen as a whole, and would
-// not translate cleanly into named buttons on mobile.
+// view exposes. `toggle` is only present when the focused row is a bool
+// item — flipping a checkbox is the only configurable operation that
+// translates cleanly into a single named button on embedders with a
+// native action surface. The ←/→ adjust controls remain inline (per-row
+// form controls, not screen commands), so they don't appear here.
 func (m configModel) Actions() []Action {
-	return []Action{{ID: "back", Label: "Back", Key: "esc"}}
+	actions := make([]Action, 0, 2)
+	if m.cursor >= 0 && m.cursor < len(m.items) && m.items[m.cursor].kind == configItemBool {
+		actions = append(actions, Action{ID: "toggle", Label: "Toggle", Key: "space"})
+	}
+	actions = append(actions, Action{ID: "back", Label: "Back", Key: "esc"})
+	return actions
 }
 
 // TriggerAction invokes the named action.
 func (m configModel) TriggerAction(id string) (configModel, tea.Cmd) {
 	switch id {
+	case "toggle":
+		if m.cursor < 0 || m.cursor >= len(m.items) {
+			return m, nil
+		}
+		item := &m.items[m.cursor]
+		if item.kind != configItemBool {
+			return m, nil
+		}
+		item.checked = !item.checked
+		m.applyToPrefs()
+		prefs := m.prefs
+		return m, func() tea.Msg {
+			_ = config.SavePreferences(prefs)
+			return prefsUpdatedMsg{prefs: prefs}
+		}
 	case "back":
 		return m, func() tea.Msg { return goBackFromConfigMsg{} }
 	}
@@ -161,12 +172,14 @@ func (m configModel) View() string {
 	}
 
 	b.WriteString("\n")
-	// Item-level controls (space, ←/→) stay hand-rendered alongside the
-	// auto-rendered screen-level actions (back) so both surfaces are
-	// visible without forcing them into the actions abstraction.
-	hint := "  space: toggle · ←/→: adjust"
-	if h := renderActionHints(m.Actions()); h != "" {
-		hint += " ·" + strings.TrimPrefix(h, " ")
+	// `toggle` and `back` come out of Actions(); ←/→ adjust stays
+	// hand-rendered as a per-row form control (it operates on whichever
+	// int item the cursor is on, not on the screen as a whole).
+	hint := renderActionHints(m.Actions())
+	if hint == "" {
+		hint = "  ←/→: adjust"
+	} else {
+		hint += " · ←/→: adjust"
 	}
 	b.WriteString(helpStyle.Render(hint))
 

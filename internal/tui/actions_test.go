@@ -75,11 +75,24 @@ func TestSessionsModel_Actions(t *testing.T) {
 }
 
 func TestConfigModel_Actions(t *testing.T) {
-	m := configModel{}
-	got := actionIDs(m.Actions())
-	want := []string{"back"}
-	if !equalStrings(got, want) {
-		t.Fatalf("ids=%v, want=%v", got, want)
+	cases := []struct {
+		name    string
+		items   []configItem
+		cursor  int
+		wantIDs []string
+	}{
+		{"empty (defensive)", nil, 0, []string{"back"}},
+		{"cursor on bool item", []configItem{{kind: configItemBool}}, 0, []string{"toggle", "back"}},
+		{"cursor on int item", []configItem{{kind: configItemBool}, {kind: configItemInt}}, 1, []string{"back"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := configModel{items: tc.items, cursor: tc.cursor}
+			got := actionIDs(m.Actions())
+			if !equalStrings(got, tc.wantIDs) {
+				t.Fatalf("ids=%v, want=%v", got, tc.wantIDs)
+			}
+		})
 	}
 }
 
