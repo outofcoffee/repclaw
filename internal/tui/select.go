@@ -70,12 +70,13 @@ var namePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // selectModel is the agent selection view.
 type selectModel struct {
-	list     list.Model
-	client   *client.Client
-	loading  bool
-	err      error
-	mainKey  string
-	selected bool
+	list      list.Model
+	client    *client.Client
+	loading   bool
+	err       error
+	mainKey   string
+	selected  bool
+	hideHints bool
 
 	// Create-agent form state.
 	subState       selectSubState
@@ -95,18 +96,24 @@ type agentsLoadedMsg struct {
 	err    error
 }
 
-func newSelectModel(c *client.Client) selectModel {
+func newSelectModel(c *client.Client, hideHints bool) selectModel {
 	l := list.New(nil, agentDelegate{}, 0, 0)
 	l.Title = "Select an agent"
 	l.SetShowStatusBar(false)
-	l.SetShowHelp(true)
+	// The bubbles list widget renders its own keyboard-hint footer
+	// ("↑/k up · ↓/j down · q quit · ? more"). Embedders that surface
+	// actions through native controls suppress every hint line — those
+	// keys typically aren't reachable from the host's input surface
+	// anyway.
+	l.SetShowHelp(!hideHints)
 	l.Styles.Title = headerStyle
 	l.SetFilteringEnabled(false)
 
 	return selectModel{
-		list:    l,
-		client:  c,
-		loading: true,
+		list:      l,
+		client:    c,
+		loading:   true,
+		hideHints: hideHints,
 	}
 }
 
@@ -384,19 +391,30 @@ func (m selectModel) View() string {
 	if m.loading {
 		return "\n  Connecting to gateway...\n"
 	}
+	hints := m.renderHints()
 	if m.err != nil {
 		var b strings.Builder
 		b.WriteString("\n")
 		b.WriteString(errorStyle.Render(fmt.Sprintf("  Error: %v", m.err)))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render(renderActionHints(m.Actions())))
+		b.WriteString(hints)
 		b.WriteString("\n")
 		return b.String()
 	}
 	if m.subState == subStateCreate {
 		return m.viewCreateForm()
 	}
-	return m.list.View() + "\n" + helpStyle.Render(renderActionHints(m.Actions()))
+	return m.list.View() + "\n" + hints
+}
+
+// renderHints emits the inline action-hint help line, or the empty
+// string when the embedder has signalled (via HideActionHints) that it
+// will surface the same actions through native controls.
+func (m selectModel) renderHints() string {
+	if m.hideHints {
+		return ""
+	}
+	return helpStyle.Render(renderActionHints(m.Actions()))
 }
 
 func (m selectModel) viewCreateForm() string {

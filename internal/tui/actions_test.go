@@ -2,9 +2,12 @@ package tui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/lucinate-ai/lucinate/internal/config"
 )
 
 func TestSelectModel_Actions(t *testing.T) {
@@ -94,6 +97,52 @@ func TestConfigModel_Actions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHideActionHints_Suppresses verifies the inline help line is
+// emitted by default and omitted when the embedder has signalled that
+// it surfaces the same actions itself. We assert against the rendered
+// hint substring rather than the entire view so style changes elsewhere
+// don't make the test brittle.
+func TestHideActionHints_Suppresses(t *testing.T) {
+	t.Run("select", func(t *testing.T) {
+		shown := newSelectModel(nil, false)
+		shown.loading = false
+		hidden := newSelectModel(nil, true)
+		hidden.loading = false
+		if !strings.Contains(shown.View(), "n: new agent") {
+			t.Fatalf("expected hint with hideHints=false, got: %q", shown.View())
+		}
+		if strings.Contains(hidden.View(), "n: new agent") {
+			t.Fatalf("expected no hint with hideHints=true, got: %q", hidden.View())
+		}
+	})
+	t.Run("sessions", func(t *testing.T) {
+		shown := newSessionsModel(nil, "a", "A", "m", "k", false)
+		shown.loading = false
+		hidden := newSessionsModel(nil, "a", "A", "m", "k", true)
+		hidden.loading = false
+		if !strings.Contains(shown.View(), "esc: back") {
+			t.Fatalf("expected hint with hideHints=false, got: %q", shown.View())
+		}
+		if strings.Contains(hidden.View(), "esc: back") {
+			t.Fatalf("expected no hint with hideHints=true, got: %q", hidden.View())
+		}
+	})
+	t.Run("config", func(t *testing.T) {
+		prefs := config.DefaultPreferences()
+		shown := newConfigModel(prefs, false)
+		hidden := newConfigModel(prefs, true)
+		if !strings.Contains(shown.View(), "space: toggle") {
+			t.Fatalf("expected hint with hideHints=false, got: %q", shown.View())
+		}
+		if strings.Contains(hidden.View(), "space: toggle") {
+			t.Fatalf("expected no hint with hideHints=true, got: %q", hidden.View())
+		}
+		if strings.Contains(hidden.View(), "←/→: adjust") {
+			t.Fatalf("expected ←/→ adjust hint also suppressed, got: %q", hidden.View())
+		}
+	})
 }
 
 func TestRenderActionHints(t *testing.T) {

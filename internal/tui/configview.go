@@ -29,16 +29,18 @@ type configItem struct {
 }
 
 type configModel struct {
-	items  []configItem
-	cursor int
-	prefs  config.Preferences
-	width  int
-	height int
+	items     []configItem
+	cursor    int
+	prefs     config.Preferences
+	width     int
+	height    int
+	hideHints bool
 }
 
-func newConfigModel(prefs config.Preferences) configModel {
+func newConfigModel(prefs config.Preferences, hideHints bool) configModel {
 	return configModel{
-		prefs: prefs,
+		prefs:     prefs,
+		hideHints: hideHints,
 		items: []configItem{
 			{label: "Completion notification (terminal bell)", key: "completionBell", kind: configItemBool, checked: prefs.CompletionBell},
 			{label: "History limit (messages loaded per session)", key: "historyLimit", kind: configItemInt, value: prefs.HistoryLimit, min: 10, max: 500, step: 10},
@@ -171,17 +173,20 @@ func (m configModel) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
-	// `toggle` and `back` come out of Actions(); ←/→ adjust stays
-	// hand-rendered as a per-row form control (it operates on whichever
-	// int item the cursor is on, not on the screen as a whole).
-	hint := renderActionHints(m.Actions())
-	if hint == "" {
-		hint = "  ←/→: adjust"
-	} else {
-		hint += " · ←/→: adjust"
+	if !m.hideHints {
+		b.WriteString("\n")
+		// `toggle` and `back` come out of Actions(); ←/→ adjust stays
+		// hand-rendered as a per-row form control (it operates on
+		// whichever int item the cursor is on, not on the screen as a
+		// whole).
+		hint := renderActionHints(m.Actions())
+		if hint == "" {
+			hint = "  ←/→: adjust"
+		} else {
+			hint += " · ←/→: adjust"
+		}
+		b.WriteString(helpStyle.Render(hint))
 	}
-	b.WriteString(helpStyle.Render(hint))
 
 	return b.String()
 }

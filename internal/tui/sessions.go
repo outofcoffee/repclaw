@@ -99,13 +99,16 @@ type sessionsModel struct {
 	mainKey   string
 	loading   bool
 	err       error
+	hideHints bool
 }
 
-func newSessionsModel(c *client.Client, agentID, agentName, modelID, mainKey string) sessionsModel {
+func newSessionsModel(c *client.Client, agentID, agentName, modelID, mainKey string, hideHints bool) sessionsModel {
 	l := list.New(nil, sessionDelegate{}, 0, 0)
 	l.Title = "Sessions"
 	l.SetShowStatusBar(false)
-	l.SetShowHelp(true)
+	// Same rationale as selectModel: hide the list widget's keyboard
+	// footer when the embedder is rendering its own action surface.
+	l.SetShowHelp(!hideHints)
 	l.Styles.Title = headerStyle
 	l.SetFilteringEnabled(false)
 
@@ -117,6 +120,7 @@ func newSessionsModel(c *client.Client, agentID, agentName, modelID, mainKey str
 		modelID:   modelID,
 		mainKey:   mainKey,
 		loading:   true,
+		hideHints: hideHints,
 	}
 }
 
@@ -359,7 +363,10 @@ func (m sessionsModel) View() string {
 	if m.loading {
 		return "\n  Loading sessions...\n"
 	}
-	hints := helpStyle.Render(renderActionHints(m.Actions()))
+	hints := ""
+	if !m.hideHints {
+		hints = helpStyle.Render(renderActionHints(m.Actions()))
+	}
 	if m.err != nil {
 		var b strings.Builder
 		b.WriteString("\n")

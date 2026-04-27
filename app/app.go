@@ -69,6 +69,14 @@ type RunOptions struct {
 	// false.
 	HideInputArea bool
 
+	// HideActionHints suppresses the inline help line each view renders
+	// listing its action keys ("  n: new agent · r: retry"). Embedders
+	// that surface the same actions through OnActionsChanged as native
+	// controls (buttons, toolbar items) want this true so the hint text
+	// isn't doubled up on screen. The CLI, whose only action surface is
+	// the inline hint, leaves it false.
+	HideActionHints bool
+
 	// DisableMouse stops the program from emitting the
 	// alt-screen mouse-tracking enable sequence. Embedders driving the
 	// program through a virtual terminal whose host wants to handle
@@ -137,6 +145,7 @@ func New(opts RunOptions) (*Program, error) {
 
 	model := tui.NewApp(opts.Client, tui.AppOptions{
 		HideInputArea:       opts.HideInputArea,
+		HideActionHints:     opts.HideActionHints,
 		DisableMouse:        opts.DisableMouse,
 		OnInputFocusChanged: opts.OnInputFocusChanged,
 		OnActionsChanged:    opts.OnActionsChanged,

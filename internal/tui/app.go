@@ -23,8 +23,9 @@ const (
 // duplicate UI) set HideInputArea; see app.RunOptions for the full
 // rationale.
 type AppOptions struct {
-	HideInputArea bool
-	DisableMouse  bool
+	HideInputArea   bool
+	HideActionHints bool
+	DisableMouse    bool
 
 	// OnInputFocusChanged, if non-nil, is invoked whenever the active
 	// view's preferred input mode changes. See app.RunOptions for the
@@ -39,17 +40,18 @@ type AppOptions struct {
 
 // AppModel is the root bubbletea model.
 type AppModel struct {
-	state         viewState
-	selectModel   selectModel
-	chatModel     chatModel
-	sessionsModel sessionsModel
-	configModel   configModel
-	client        *client.Client
-	prefs         config.Preferences
-	width         int
-	height        int
-	hideInput     bool
-	disableMouse  bool
+	state           viewState
+	selectModel     selectModel
+	chatModel       chatModel
+	sessionsModel   sessionsModel
+	configModel     configModel
+	client          *client.Client
+	prefs           config.Preferences
+	width           int
+	height          int
+	hideInput       bool
+	hideActionHints bool
+	disableMouse    bool
 
 	onInputFocusChanged func(bool)
 	lastWantsInput      bool
@@ -64,10 +66,11 @@ type AppModel struct {
 func NewApp(c *client.Client, opts AppOptions) AppModel {
 	return AppModel{
 		state:               viewSelect,
-		selectModel:         newSelectModel(c),
+		selectModel:         newSelectModel(c, opts.HideActionHints),
 		client:              c,
 		prefs:               config.LoadPreferences(),
 		hideInput:           opts.HideInputArea,
+		hideActionHints:     opts.HideActionHints,
 		disableMouse:        opts.DisableMouse,
 		onInputFocusChanged: opts.OnInputFocusChanged,
 		onActionsChanged:    opts.OnActionsChanged,
@@ -231,7 +234,7 @@ func (m AppModel) update(msg tea.Msg) (AppModel, tea.Cmd) {
 		return m, nil
 
 	case showConfigMsg:
-		m.configModel = newConfigModel(m.prefs)
+		m.configModel = newConfigModel(m.prefs, m.hideActionHints)
 		m.configModel.setSize(m.width, m.height)
 		m.state = viewConfig
 		return m, nil
@@ -250,7 +253,7 @@ func (m AppModel) update(msg tea.Msg) (AppModel, tea.Cmd) {
 		return m, nil
 
 	case showSessionsMsg:
-		m.sessionsModel = newSessionsModel(m.client, msg.agentID, msg.agentName, msg.modelID, msg.mainKey)
+		m.sessionsModel = newSessionsModel(m.client, msg.agentID, msg.agentName, msg.modelID, msg.mainKey, m.hideActionHints)
 		m.sessionsModel.setSize(m.width, m.height)
 		m.state = viewSessions
 		return m, m.sessionsModel.Init()
