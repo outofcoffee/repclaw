@@ -79,7 +79,22 @@ func (m AppModel) Init() tea.Cmd {
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	prevState := m.state
 	next, cmd := m.update(msg)
+	if next.state != prevState {
+		// View transitions in an embedded terminal can leave stale cells
+		// from the previous view when an on-screen keyboard
+		// simultaneously toggles and resizes the embedder's grid
+		// mid-transition. Bubble Tea's incremental renderer assumes
+		// the host terminal preserves its grid across resizes; some
+		// embedded terminals don't after a rapid show/hide/show
+		// keyboard sequence (e.g. picker → create-form → picker →
+		// chat). Forcing a clear-screen on every viewState transition
+		// guarantees the next render starts from a known-empty grid.
+		// The CLI hardly notices — terminal emulators repaint a single
+		// CSI 2J in microseconds.
+		cmd = tea.Batch(cmd, tea.ClearScreen)
+	}
 	nextModel, cmd := next.maybeNotifyInputFocus(cmd)
 	next = nextModel.(AppModel)
 	return next.maybeNotifyActions(cmd)
