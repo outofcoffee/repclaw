@@ -4,7 +4,7 @@ Lucinate authenticates to the OpenClaw gateway using device pairing. There are n
 
 ## Configuration
 
-The gateway URL is required and read from the environment:
+Gateway URLs can be added via the connections picker (the default UX) or via `OPENCLAW_GATEWAY_URL`, which is auto-added on first run. See [connections.md](connections.md#startup-decision-tree) for the full resolution order.
 
 ```
 OPENCLAW_GATEWAY_URL=https://your-gateway-host

@@ -1,6 +1,6 @@
 # Agent picker
 
-The agent picker is the first view shown on startup (`selectModel` in `internal/tui/select.go`). It loads the list of configured agents and either presents a selection UI or auto-selects when only one agent exists.
+The agent picker (`selectModel` in `internal/tui/select.go`) is shown after a connection is established — either directly on startup when the connection is unambiguous, or after the user picks one from the connections picker (see [connections.md](connections.md)). It loads the list of configured agents and either presents a selection UI or auto-selects when only one agent exists.
 
 ## Loading agents
 

@@ -7,6 +7,7 @@ This directory contains maintainer-level documentation for lucinate. It covers h
 | Document | Covers |
 |---|---|
 | [authentication.md](authentication.md) | Device pairing, Ed25519 identity, gateway connection and token lifecycle |
+| [connections.md](connections.md) | Connections picker, persisted connection store, startup decision tree, lifecycle |
 | [agents.md](agents.md) | Agent picker, auto-selection, agent creation |
 | [sessions.md](sessions.md) | Session lifecycle, session browser, compact/reset, message queueing |
 | [commands.md](commands.md) | Slash command dispatch, all built-in commands, tab completion, confirmation pattern |
