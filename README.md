@@ -5,7 +5,7 @@
 <h1 align="center">lucinate — the terminal-native AI chat client</h1>
 
 <p align="center">
-  Chat with your <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agents — or any OpenAI-compatible endpoint, including <a href="https://ollama.com">Ollama</a>, vLLM, LM Studio, and OpenAI itself — from the terminal. Streaming responses, markdown rendering, no mouse required.
+  Chat with your <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agents — or any OpenAI-compatible endpoint, including <a href="https://ollama.com">Ollama</a>, vLLM, LM Studio, and OpenAI — from the terminal. Streaming responses, markdown rendering, no mouse required.
 </p>
 
 <p align="center">
@@ -54,37 +54,24 @@ go build -o lucinate .
 
 ### 1. Configure lucinate
 
-On first launch lucinate opens a **Connections** picker so you can add a backend without setting any env vars. Saved connections live in `~/.lucinate/connections.json`; the most recently used is selected automatically next time.
+On first launch lucinate opens a **Connections** picker so you can add a backend.
 
 Two connection types are supported:
 
-- **OpenClaw** — connect to an OpenClaw gateway over WebSocket. Auth uses Ed25519 device pairing. See [docs/backend_openclaw.md](docs/backend_openclaw.md).
-- **OpenAI-compatible** — connect to any `/v1/chat/completions` endpoint (Ollama, vLLM, LM Studio, llamafile, OpenAI proper). Agents are stored locally as IDENTITY.md + SOUL.md markdown under `~/.lucinate/agents/<connection-id>/<agent-id>/`, composed into the system prompt at runtime. See [docs/backend_openai.md](docs/backend_openai.md).
-
-Prefer env vars? Either is recognised on first run and auto-added as a connection:
-
-```sh
-OPENCLAW_GATEWAY_URL=https://your-gateway-host
-LUCINATE_OPENAI_BASE_URL=http://localhost:11434/v1
-LUCINATE_OPENAI_API_KEY=sk-...           # optional
-LUCINATE_OPENAI_DEFAULT_MODEL=llama3.2   # optional
-```
+- **[OpenClaw](docs/backend_openclaw.md)** — connect to an OpenClaw gateway over WebSocket. Auth uses Ed25519 device pairing.
+- **[OpenAI-compatible](docs/backend_openai.md)** — connect to any `/v1/chat/completions` endpoint (Ollama, vLLM, LM Studio, llamafile, OpenAI).
 
 OpenClaw URLs can use `https`, `http`, `wss`, or `ws` — lucinate derives the WebSocket endpoint automatically. OpenAI-compatible URLs are HTTP(S) base URLs ending in `/v1`.
 
 Switch between saved connections at any time with `/connections` from the chat view. Use `n` to add a new one, `e` to edit, `d` to delete (with confirmation).
 
-### Flags
-
-| Flag | Description |
-|------|-------------|
-| `--version`, `-v` | Print version and exit |
-
-### 2. Connect and approve the device
+### 2. Connect
 
 ```sh
 lucinate
 ```
+
+#### Optional (OpenClaw only)
 
 On first run, lucinate generates an Ed25519 device identity under `~/.lucinate/identity/<endpoint>/` (keyed by gateway host) and sends a pairing request to the gateway. On the gateway host, run:
 
@@ -179,6 +166,23 @@ Prefix input with `!!` to run a command on the gateway host. The input border tu
 ```
 
 The gateway's exec security policy controls which remote commands are allowed. If a command is denied, you'll see an error message. Configure exec permissions on the gateway host using `openclaw config`.
+
+### Command line flags
+
+| Flag | Description |
+|------|-------------|
+| `--version`, `-v` | Print version and exit |
+
+### Environment variables
+
+Prefer env vars? Either is recognised on first run and auto-added as a connection:
+
+```sh
+OPENCLAW_GATEWAY_URL=https://your-gateway-host
+LUCINATE_OPENAI_BASE_URL=http://localhost:11434/v1
+LUCINATE_OPENAI_API_KEY=sk-...           # optional
+LUCINATE_OPENAI_DEFAULT_MODEL=llama3.2   # optional
+```
 
 ## Built on
 
