@@ -3,6 +3,7 @@ lucinate
 
 # Environment
 .env
+.env.openai
 
 # Coverage
 coverage.out

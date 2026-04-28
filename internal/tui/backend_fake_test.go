@@ -48,6 +48,7 @@ func newFakeBackend() *fakeBackend {
 			Thinking:       true,
 			SessionUsage:   true,
 			AuthRecovery:   backend.AuthRecoveryDeviceToken,
+			AgentWorkspace: true,
 		},
 	}
 }

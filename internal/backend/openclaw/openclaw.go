@@ -93,6 +93,7 @@ func (b *Backend) Capabilities() backend.Capabilities {
 		Thinking:       true,
 		SessionUsage:   true,
 		AuthRecovery:   backend.AuthRecoveryDeviceToken,
+		AgentWorkspace: true,
 	}
 }
 

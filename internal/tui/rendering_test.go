@@ -253,10 +253,13 @@ func TestRender_ChatView_RemoteExecModeHelpText(t *testing.T) {
 	waitForContains(t, tm.Output(), "remote command")
 }
 
-// newLoadedSelectAdapter returns a selectModelAdapter with agents already loaded.
+// newLoadedSelectAdapter returns a selectModelAdapter with agents
+// already loaded against a workspace-aware fake backend (matches the
+// shape of the OpenClaw create form, which is what the rendering
+// tests assert against).
 func newLoadedSelectAdapter(t *testing.T, agents ...protocol.AgentSummary) selectModelAdapter {
 	t.Helper()
-	m := newSelectModel(nil, false, false)
+	m := newSelectModel(newFakeBackend(), false, false)
 	m.setSize(120, 40)
 	m, _ = m.Update(agentsLoadedMsg{
 		result: &protocol.AgentsListResult{
@@ -314,6 +317,59 @@ func TestRender_SelectView_CreateFormLabels(t *testing.T) {
 	defer finishProgram(t, tm)
 
 	waitForContains(t, tm.Output(), "Create new agent", "Name (e.g. my-agent):", "Workspace:", "Tab: switch fields")
+}
+
+// TestRender_SelectView_CreateFormHidesWorkspaceForLocalBackend
+// guards against the bug where the OpenClaw workspace placeholder
+// leaked into the create form on local-agent backends. Backends opt
+// in via Capabilities.AgentWorkspace.
+func TestRender_SelectView_CreateFormHidesWorkspaceForLocalBackend(t *testing.T) {
+	fb := newFakeBackend()
+	fb.caps.AgentWorkspace = false
+	m := newSelectModel(fb, false, false)
+	m.setSize(120, 40)
+	m, _ = m.Update(agentsLoadedMsg{
+		result: &protocol.AgentsListResult{
+			DefaultID: "main",
+			MainKey:   "main",
+			Agents:    []protocol.AgentSummary{{ID: "main", Name: "Primary"}},
+		},
+	})
+	m.initCreateForm()
+	adapter := selectModelAdapter{inner: m}
+
+	tm := teatest.NewTestModel(t, adapter, teatest.WithInitialTermSize(120, 40))
+	defer finishProgram(t, tm)
+
+	// The Identity/Soul hint replaces the Workspace block — assert
+	// the new wording renders. Negative assertions on "Workspace:"
+	// would race the streaming output, so we rely on the unit test
+	// to cover that the label isn't emitted.
+	waitForContains(t, tm.Output(), "Create new agent", "Identity and Soul markdown", "Enter: create | Esc: cancel")
+}
+
+// TestSelectModel_LocalBackendCreateFormShape verifies that the
+// non-workspace branch of viewCreateForm doesn't reach for OpenClaw
+// labels. Unit test, since the negative assertion against the
+// rendered output races teatest's stream consumption.
+func TestSelectModel_LocalBackendCreateFormShape(t *testing.T) {
+	fb := newFakeBackend()
+	fb.caps.AgentWorkspace = false
+	m := newSelectModel(fb, true, false)
+	m.initCreateForm()
+	out := m.viewCreateForm()
+	if strings.Contains(out, "Workspace:") {
+		t.Errorf("local-agent create form rendered Workspace label:\n%s", out)
+	}
+	if strings.Contains(out, "~/.openclaw/") {
+		t.Errorf("local-agent create form leaked OpenClaw path hint:\n%s", out)
+	}
+	if !strings.Contains(out, "Identity and Soul markdown") {
+		t.Errorf("local-agent create form missing identity/soul hint:\n%s", out)
+	}
+	if strings.Contains(out, "Tab: switch fields") {
+		t.Errorf("local-agent create form should not advertise Tab — only one field is focusable:\n%s", out)
+	}
 }
 
 func TestRender_SelectView_ErrorStateShowsRetryHint(t *testing.T) {

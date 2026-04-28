@@ -18,9 +18,18 @@ Pressing Enter on a highlighted agent calls `client.CreateSession(agentID, key)`
 
 ## Creating an agent
 
-Pressing `n` in the picker switches to a two-field creation form (`subStateCreate`):
+Pressing `n` in the picker switches to a creation form (`subStateCreate`). The form's shape is driven by the active backend's `Capabilities.AgentWorkspace` flag (see `backend.Capabilities`).
 
-- **Name** — must start with a lowercase letter and contain only alphanumeric characters and hyphens. The input is validated on submit; an error is shown inline on failure.
+**OpenClaw** (workspace-aware):
+
+- **Name** — must start with a lowercase letter and contain only alphanumeric characters and hyphens. Validated on submit.
 - **Workspace** — a filesystem path that is auto-suggested but editable.
 
-On submit, `client.CreateAgent(name, workspace)` is called. The gateway creates the agent and seeds an `IDENTITY.md` file in the workspace. On success the agent list is reloaded and the new agent is auto-selected (see above). On failure the form stays open and the error is shown so the user can correct and retry.
+On submit, `Backend.CreateAgent` is called with both fields. The gateway creates the agent and seeds an `IDENTITY.md` file in the workspace.
+
+**OpenAI-compatible** (local-agent backends):
+
+- **Name** — same validation rules as above.
+- The workspace field is hidden. On submit, the backend seeds `IDENTITY.md` and `SOUL.md` with defaults under `~/.lucinate/agents/<connection>/<agent>/`. Users edit those files on disk to customise the agent's identity and behaviour — see [connections.md](connections.md#openai-agent-storage).
+
+On success the agent list is reloaded and the new agent is auto-selected (see above). On failure the form stays open and the error is shown so the user can correct and retry.
