@@ -176,12 +176,35 @@ const (
 	formCronExpr
 	formTimezone
 	formAgentID
+	formModel
 	formSessionTarget
 	formWakeMode
 	formPayloadText
+	formDeliveryMode
+	formDeliveryTarget
 	formEnabled
 	formFieldCount
 )
+
+// deliveryModes is the cycle order for the delivery-mode toggle in the
+// form. "none" leaves the gateway silent after a run; "announce" posts
+// to a channel (Slack/Telegram/...); "webhook" POSTs to an external URL.
+var deliveryModes = []string{"none", "announce", "webhook"}
+
+// cycleString advances current to the next entry in opts (wrapping to
+// the start), returning the new value. Used by multi-state toggles in
+// the cron form.
+func cycleString(opts []string, current string) string {
+	for i, o := range opts {
+		if o == current {
+			return opts[(i+1)%len(opts)]
+		}
+	}
+	if len(opts) > 0 {
+		return opts[0]
+	}
+	return current
+}
 
 // cronForm carries the in-progress create/edit-job form state. The form
 // only supports the cron-style schedule kind and the agentTurn payload
@@ -192,15 +215,18 @@ type cronForm struct {
 	mode      string // "create" or "edit"
 	editingID string // job ID being edited; "" in create mode
 
-	name        textinput.Model
-	description textinput.Model
-	cronExpr    textinput.Model
-	timezone    textinput.Model
-	agentID     textinput.Model
-	payloadText textarea.Model
+	name           textinput.Model
+	description    textinput.Model
+	cronExpr       textinput.Model
+	timezone       textinput.Model
+	agentID        textinput.Model
+	model          textinput.Model
+	payloadText    textarea.Model
+	deliveryTarget textinput.Model // channel for announce, URL for webhook
 
 	sessionTarget string // "main" or "isolated"
 	wakeMode      string // "next-heartbeat" or "now"
+	deliveryMode  string // "none", "announce", "webhook"
 	enabled       bool
 
 	focused      cronFormField
@@ -768,6 +794,7 @@ func newCreateForm() cronForm {
 		mode:          "create",
 		sessionTarget: "isolated",
 		wakeMode:      "next-heartbeat",
+		deliveryMode:  "none",
 		enabled:       true,
 		focused:       formName,
 	}
@@ -783,12 +810,17 @@ func newCreateForm() cronForm {
 	f.timezone.CharLimit = 64
 	f.agentID = textinput.New()
 	f.agentID.CharLimit = 64
+	f.model = textinput.New()
+	f.model.Placeholder = "leave blank to use the agent default"
+	f.model.CharLimit = 128
 	f.payloadText = textarea.New()
 	f.payloadText.CharLimit = 4000
 	f.payloadText.SetHeight(6)
 	f.payloadText.ShowLineNumbers = false
 	f.payloadText.Prompt = ""
 	f.payloadText.Placeholder = "Read /home/pete/projects/cron-jobs/example.md and follow the instructions."
+	f.deliveryTarget = textinput.New()
+	f.deliveryTarget.CharLimit = 256
 	return f
 }
 
@@ -805,6 +837,7 @@ func newEditForm(job protocol.CronJob) (cronForm, string) {
 	f.cronExpr.SetValue(job.Schedule.Expr)
 	f.timezone.SetValue(job.Schedule.Tz)
 	f.agentID.SetValue(job.AgentID)
+	f.model.SetValue(job.Payload.Model)
 	f.payloadText.SetValue(job.Payload.Text)
 	if f.payloadText.Value() == "" {
 		f.payloadText.SetValue(job.Payload.Message)
@@ -814,6 +847,15 @@ func newEditForm(job protocol.CronJob) (cronForm, string) {
 	}
 	if job.WakeMode != "" {
 		f.wakeMode = job.WakeMode
+	}
+	if job.Delivery != nil && job.Delivery.Mode != "" {
+		f.deliveryMode = job.Delivery.Mode
+		switch job.Delivery.Mode {
+		case "webhook":
+			f.deliveryTarget.SetValue(job.Delivery.To)
+		default:
+			f.deliveryTarget.SetValue(job.Delivery.Channel)
+		}
 	}
 	f.enabled = job.Enabled
 
@@ -870,6 +912,9 @@ func (m cronsModel) handleFormKey(msg tea.KeyPressMsg) (cronsModel, tea.Cmd) {
 				m.form.wakeMode = "now"
 			}
 			return m, nil
+		case formDeliveryMode:
+			m.form.deliveryMode = cycleString(deliveryModes, m.form.deliveryMode)
+			return m, nil
 		case formEnabled:
 			m.form.enabled = !m.form.enabled
 			return m, nil
@@ -905,6 +950,10 @@ func (f *cronForm) activeInput() *textinput.Model {
 		return &f.timezone
 	case formAgentID:
 		return &f.agentID
+	case formModel:
+		return &f.model
+	case formDeliveryTarget:
+		return &f.deliveryTarget
 	}
 	return nil
 }
@@ -930,6 +979,8 @@ func (f *cronForm) refocus() tea.Cmd {
 	f.cronExpr.Blur()
 	f.timezone.Blur()
 	f.agentID.Blur()
+	f.model.Blur()
+	f.deliveryTarget.Blur()
 	f.payloadText.Blur()
 	if f.focused == formPayloadText {
 		return f.payloadText.Focus()
@@ -990,9 +1041,11 @@ func buildAddParams(f cronForm) protocol.CronAddParams {
 			Tz:   f.timezone.Value(),
 		},
 		Payload: protocol.CronPayload{
-			Kind: "agentTurn",
-			Text: f.payloadText.Value(),
+			Kind:  "agentTurn",
+			Text:  f.payloadText.Value(),
+			Model: f.model.Value(),
 		},
+		Delivery: buildDelivery(f),
 	}
 	if v := f.agentID.Value(); v != "" {
 		params.AgentID = &v
@@ -1014,9 +1067,11 @@ func buildJobPatch(f cronForm) protocol.CronJobPatch {
 			Tz:   f.timezone.Value(),
 		},
 		Payload: &protocol.CronPayload{
-			Kind: "agentTurn",
-			Text: f.payloadText.Value(),
+			Kind:  "agentTurn",
+			Text:  f.payloadText.Value(),
+			Model: f.model.Value(),
 		},
+		Delivery: buildDelivery(f),
 	}
 	if v := f.agentID.Value(); v != "" {
 		patch.AgentID = &v
@@ -1024,6 +1079,25 @@ func buildJobPatch(f cronForm) protocol.CronJobPatch {
 	enabled := f.enabled
 	patch.Enabled = &enabled
 	return patch
+}
+
+// buildDelivery turns the form's deliveryMode + deliveryTarget into a
+// *CronDelivery, or nil when the user picked "none". For "announce" the
+// target is the channel; for "webhook" it's the destination URL.
+func buildDelivery(f cronForm) *protocol.CronDelivery {
+	switch f.deliveryMode {
+	case "announce":
+		return &protocol.CronDelivery{
+			Mode:    "announce",
+			Channel: f.deliveryTarget.Value(),
+		}
+	case "webhook":
+		return &protocol.CronDelivery{
+			Mode: "webhook",
+			To:   f.deliveryTarget.Value(),
+		}
+	}
+	return nil
 }
 
 // -----------------------------------------------------------------------------
@@ -1108,16 +1182,15 @@ func (m cronsModel) viewDetail() string {
 		{"Schedule", formatSchedule(job.Schedule)},
 		{"Description", orDash(job.Description)},
 		{"Agent", orDash(job.AgentID)},
+		{"Model", orDash(job.Payload.Model)},
 		{"Session", orDash(job.SessionTarget)},
 		{"Wake", wakeModeLabel(job.WakeMode)},
+		{"Delivery", formatDeliveryOrNone(job.Delivery)},
 		{"Next run", formatAbsTime(job.State.NextRunAtMs)},
 		{"Last run", formatLastRun(job.State)},
 	}
 	for _, r := range rows {
 		b.WriteString(fmt.Sprintf("  %-12s  %s\n", r[0], r[1]))
-	}
-	if delivery := formatDelivery(job.Delivery); delivery != "" {
-		b.WriteString(fmt.Sprintf("  %-12s  %s\n", "Delivery", delivery))
 	}
 	b.WriteString("\n")
 	b.WriteString("  Payload:\n")
@@ -1180,9 +1253,12 @@ func (m cronsModel) viewForm() string {
 		{"Cron expression", formCronExpr, m.form.cronExpr.View()},
 		{"Timezone", formTimezone, m.form.timezone.View()},
 		{"Agent ID (optional)", formAgentID, m.form.agentID.View()},
+		{"Model (optional)", formModel, m.form.model.View()},
 		{"Session target", formSessionTarget, toggleView(m.form.sessionTarget, "main", "isolated")},
 		{"Wake mode", formWakeMode, toggleView(m.form.wakeMode, "next-heartbeat", "now")},
 		{"Payload (agent turn text)", formPayloadText, m.form.payloadText.View()},
+		{"Delivery mode", formDeliveryMode, cycleView(deliveryModes, m.form.deliveryMode)},
+		{deliveryTargetLabel(m.form.deliveryMode), formDeliveryTarget, m.form.deliveryTarget.View()},
 		{"Enabled", formEnabled, checkboxView(m.form.enabled)},
 	}
 	for _, r := range rows {
@@ -1239,6 +1315,34 @@ func toggleView(current, opt1, opt2 string) string {
 		return statusStyle.Render(" " + label + " ")
 	}
 	return render(opt1) + " " + render(opt2)
+}
+
+// cycleView is toggleView for an N-state field (the delivery-mode
+// cycle). The current option is highlighted; non-active options are
+// rendered dim.
+func cycleView(opts []string, current string) string {
+	parts := make([]string, len(opts))
+	for i, o := range opts {
+		if o == current {
+			parts[i] = lipgloss.NewStyle().Foreground(accent).Bold(true).Render("[" + o + "]")
+		} else {
+			parts[i] = statusStyle.Render(" " + o + " ")
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// deliveryTargetLabel returns the input label that matches the current
+// delivery mode. "none" still shows the field but disabled-looking so
+// the layout stays stable as the user cycles modes.
+func deliveryTargetLabel(mode string) string {
+	switch mode {
+	case "announce":
+		return "Channel (e.g. slack:#alerts)"
+	case "webhook":
+		return "Webhook URL"
+	}
+	return "Delivery target (unused while mode=none)"
 }
 
 func checkboxView(checked bool) string {
@@ -1299,6 +1403,16 @@ func formatDelivery(d *protocol.CronDelivery) string {
 		out += " → " + d.To
 	}
 	return out
+}
+
+// formatDeliveryOrNone returns "none" instead of an empty string when
+// the job has no delivery configured, so the detail view's row layout
+// stays consistent.
+func formatDeliveryOrNone(d *protocol.CronDelivery) string {
+	if s := formatDelivery(d); s != "" {
+		return s
+	}
+	return "none"
 }
 
 func formatRunLogEntry(r protocol.CronRunLogEntry) string {

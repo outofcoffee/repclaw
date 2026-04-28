@@ -190,9 +190,12 @@ func TestCronsForm_BuildsCronAddParams(t *testing.T) {
 	f.cronExpr.SetValue("0 9 * * *")
 	f.timezone.SetValue("Europe/London")
 	f.agentID.SetValue("agent-1")
+	f.model.SetValue("claude-opus-4-7")
 	f.payloadText.SetValue("Please generate today's report.")
 	f.sessionTarget = "main"
 	f.wakeMode = "now"
+	f.deliveryMode = "announce"
+	f.deliveryTarget.SetValue("slack:#alerts")
 	f.enabled = true
 
 	params := buildAddParams(f)
@@ -205,6 +208,9 @@ func TestCronsForm_BuildsCronAddParams(t *testing.T) {
 	if params.Payload.Kind != "agentTurn" || params.Payload.Text != "Please generate today's report." {
 		t.Errorf("Payload: %+v", params.Payload)
 	}
+	if params.Payload.Model != "claude-opus-4-7" {
+		t.Errorf("Payload.Model: %q", params.Payload.Model)
+	}
 	if params.SessionTarget != "main" || params.WakeMode != "now" {
 		t.Errorf("SessionTarget/WakeMode: %q/%q", params.SessionTarget, params.WakeMode)
 	}
@@ -213,6 +219,52 @@ func TestCronsForm_BuildsCronAddParams(t *testing.T) {
 	}
 	if params.Enabled == nil || !*params.Enabled {
 		t.Errorf("Enabled: %+v", params.Enabled)
+	}
+	if params.Delivery == nil || params.Delivery.Mode != "announce" || params.Delivery.Channel != "slack:#alerts" {
+		t.Errorf("Delivery: %+v", params.Delivery)
+	}
+}
+
+func TestCronsForm_BuildDelivery_Webhook(t *testing.T) {
+	f := newCreateForm()
+	f.deliveryMode = "webhook"
+	f.deliveryTarget.SetValue("https://example.com/hook")
+	d := buildDelivery(f)
+	if d == nil || d.Mode != "webhook" || d.To != "https://example.com/hook" {
+		t.Errorf("expected webhook delivery, got %+v", d)
+	}
+}
+
+func TestCronsForm_BuildDelivery_NoneReturnsNil(t *testing.T) {
+	f := newCreateForm()
+	if d := buildDelivery(f); d != nil {
+		t.Errorf("expected nil for mode=none, got %+v", d)
+	}
+}
+
+func TestCronsForm_PrePopulatesModelAndDelivery(t *testing.T) {
+	job := protocol.CronJob{
+		ID:            "job-1",
+		Name:          "Foo",
+		Enabled:       true,
+		SessionTarget: "isolated",
+		WakeMode:      "now",
+		Schedule:      protocol.CronSchedule{Kind: "cron", Expr: "0 9 * * *"},
+		Payload:       protocol.CronPayload{Kind: "agentTurn", Text: "hi", Model: "haiku-4-5"},
+		Delivery:      &protocol.CronDelivery{Mode: "announce", Channel: "slack:#general"},
+	}
+	form, banner := newEditForm(job)
+	if banner != "" {
+		t.Fatalf("unexpected unsupported banner: %q", banner)
+	}
+	if got := form.model.Value(); got != "haiku-4-5" {
+		t.Errorf("model: %q", got)
+	}
+	if form.deliveryMode != "announce" {
+		t.Errorf("deliveryMode: %q", form.deliveryMode)
+	}
+	if got := form.deliveryTarget.Value(); got != "slack:#general" {
+		t.Errorf("deliveryTarget: %q", got)
 	}
 }
 
