@@ -84,11 +84,18 @@ type selectModel struct {
 	// themselves leave this false.
 	showConnections bool
 
+	// useWorkspace mirrors backend.Capabilities.AgentWorkspace —
+	// only OpenClaw uses the workspace field today. When false, the
+	// create-agent form drops the workspace input and CreateAgent is
+	// called with an empty Workspace (the backend fills its own
+	// defaults: IDENTITY/SOUL markdown for the OpenAI-compat case).
+	useWorkspace bool
+
 	// Create-agent form state.
 	subState       selectSubState
 	nameInput      textinput.Model
 	workInput      textinput.Model
-	focusedField   int // 0 = name, 1 = workspace
+	focusedField   int // 0 = name, 1 = workspace (when useWorkspace)
 	creating       bool
 	createErr      error
 	newAgentID     string
@@ -105,7 +112,14 @@ type agentsLoadedMsg struct {
 // newSelectModel constructs the agent picker. showConnections=true
 // surfaces the "Connections" action so managed-mode users can return
 // to the connections picker without first entering a chat session.
+// The backend's Capabilities.AgentWorkspace flag drives whether the
+// create-agent form renders the workspace field — this is read off b
+// here so the picker doesn't have to keep asking.
 func newSelectModel(b backend.Backend, hideHints, showConnections bool) selectModel {
+	useWorkspace := false
+	if b != nil {
+		useWorkspace = b.Capabilities().AgentWorkspace
+	}
 	l := list.New(nil, agentDelegate{}, 0, 0)
 	l.Title = "Select an agent"
 	l.SetShowStatusBar(false)
@@ -124,6 +138,7 @@ func newSelectModel(b backend.Backend, hideHints, showConnections bool) selectMo
 		loading:         true,
 		hideHints:       hideHints,
 		showConnections: showConnections,
+		useWorkspace:    useWorkspace,
 	}
 }
 
@@ -182,14 +197,22 @@ func (m *selectModel) initCreateForm() tea.Cmd {
 	m.nameInput.CharLimit = 64
 	cmd := m.nameInput.Focus()
 
-	m.workInput = textinput.New()
-	m.workInput.Placeholder = "~/.openclaw/workspaces/my-agent"
-	m.workInput.CharLimit = 256
+	if m.useWorkspace {
+		m.workInput = textinput.New()
+		m.workInput.Placeholder = "~/.openclaw/workspaces/my-agent"
+		m.workInput.CharLimit = 256
+	}
 
 	return cmd
 }
 
+// switchFocus toggles between the form's input fields. With the
+// workspace field hidden (non-OpenClaw backends) there's only one
+// focusable input — switchFocus is a no-op there.
 func (m *selectModel) switchFocus() tea.Cmd {
+	if !m.useWorkspace {
+		return nil
+	}
 	if m.focusedField == 0 {
 		m.focusedField = 1
 		m.nameInput.Blur()
@@ -353,13 +376,16 @@ func (m selectModel) handleCreateKey(msg tea.KeyPressMsg) (selectModel, tea.Cmd)
 			return m, nil
 		}
 		name := m.nameInput.Value()
-		workspace := m.workInput.Value()
 		m.nameValidMsg = validateName(name)
 		if m.nameValidMsg != "" {
 			return m, nil
 		}
-		if workspace == "" {
-			workspace = "~/.openclaw/workspaces/" + name
+		workspace := ""
+		if m.useWorkspace {
+			workspace = m.workInput.Value()
+			if workspace == "" {
+				workspace = "~/.openclaw/workspaces/" + name
+			}
 		}
 		m.creating = true
 		m.createErr = nil
@@ -386,8 +412,10 @@ func (m selectModel) updateCreateForm(msg tea.Msg) (selectModel, tea.Cmd) {
 		// Update validation.
 		m.nameValidMsg = validateName(m.nameInput.Value())
 
-		// Auto-suggest workspace when name changes and user hasn't edited workspace.
-		if m.nameInput.Value() != prevName && !m.workspaceEdited {
+		// Auto-suggest workspace when name changes and user hasn't
+		// edited workspace. Skipped for backends without a workspace
+		// concept — the suggestion path is OpenClaw-specific.
+		if m.useWorkspace && m.nameInput.Value() != prevName && !m.workspaceEdited {
 			name := m.nameInput.Value()
 			if name != "" {
 				m.workInput.SetValue("~/.openclaw/workspaces/" + name)
@@ -395,7 +423,7 @@ func (m selectModel) updateCreateForm(msg tea.Msg) (selectModel, tea.Cmd) {
 				m.workInput.SetValue("")
 			}
 		}
-	} else {
+	} else if m.useWorkspace {
 		prevWork := m.workInput.Value()
 		m.workInput, cmd = m.workInput.Update(msg)
 		if m.workInput.Value() != prevWork {
@@ -448,9 +476,18 @@ func (m selectModel) viewCreateForm() string {
 	}
 	b.WriteString("\n")
 
-	b.WriteString("  Workspace:\n")
-	b.WriteString("  " + m.workInput.View() + "\n")
-	b.WriteString("\n")
+	if m.useWorkspace {
+		b.WriteString("  Workspace:\n")
+		b.WriteString("  " + m.workInput.View() + "\n")
+		b.WriteString("\n")
+	} else {
+		// Local-agent backends (OpenAI-compat) seed the agent's
+		// IDENTITY.md / SOUL.md with defaults at create time. The
+		// user can edit those files on disk afterwards — the path
+		// is shown so they know where to find them.
+		b.WriteString(helpStyle.Render("  Identity and Soul markdown will be seeded with defaults under\n  ~/.lucinate/agents/<connection>/<agent>/ — edit them to customise."))
+		b.WriteString("\n\n")
+	}
 
 	if m.creating {
 		b.WriteString(statusStyle.Render("  Creating agent..."))
@@ -458,8 +495,10 @@ func (m selectModel) viewCreateForm() string {
 		b.WriteString(errorStyle.Render(fmt.Sprintf("  Error: %v", m.createErr)))
 		b.WriteString("\n")
 		b.WriteString(helpStyle.Render("  Enter: retry | Esc: cancel"))
-	} else {
+	} else if m.useWorkspace {
 		b.WriteString(helpStyle.Render("  Tab: switch fields | Enter: create | Esc: cancel"))
+	} else {
+		b.WriteString(helpStyle.Render("  Enter: create | Esc: cancel"))
 	}
 	b.WriteString("\n")
 	return b.String()

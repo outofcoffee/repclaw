@@ -139,6 +139,14 @@ type Capabilities struct {
 	Thinking       bool
 	SessionUsage   bool
 	AuthRecovery   AuthRecovery
+
+	// AgentWorkspace indicates the backend's CreateAgent uses the
+	// Workspace field of CreateAgentParams (filesystem path the
+	// agent operates in). The TUI's create-agent form renders the
+	// workspace field only for backends that opt in. Local-agent
+	// backends (OpenAI-compat) leave this false because Identity /
+	// Soul / Model carry the agent's configuration instead.
+	AgentWorkspace bool
 }
 
 // AuthRecovery selects the auth-modal flow the connecting view runs
