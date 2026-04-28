@@ -312,16 +312,22 @@ func (m AppModel) update(msg tea.Msg) (AppModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.connectionsModel.setSize(msg.Width, msg.Height)
-		m.connectingModel.setSize(msg.Width, msg.Height)
-		m.selectModel.setSize(msg.Width, msg.Height)
-		if m.state == viewChat {
+		// Only forward to the active view's model — the others
+		// hold zero-value bubbles widgets whose internal state
+		// panics on SetSize before they're constructed via the
+		// transition path that owns them.
+		switch m.state {
+		case viewConnections:
+			m.connectionsModel.setSize(msg.Width, msg.Height)
+		case viewConnecting:
+			m.connectingModel.setSize(msg.Width, msg.Height)
+		case viewSelect:
+			m.selectModel.setSize(msg.Width, msg.Height)
+		case viewChat:
 			m.chatModel.setSize(msg.Width, msg.Height)
-		}
-		if m.state == viewSessions {
+		case viewSessions:
 			m.sessionsModel.setSize(msg.Width, msg.Height)
-		}
-		if m.state == viewConfig {
+		case viewConfig:
 			m.configModel.setSize(msg.Width, msg.Height)
 		}
 		return m, nil
