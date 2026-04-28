@@ -167,6 +167,129 @@ func TestConnectionsModel_EnterEmitsPickedMsg(t *testing.T) {
 	}
 }
 
+func TestConnectionsModel_TypeCycleUpdatesFormType(t *testing.T) {
+	store := &config.Connections{}
+	m := newConnectionsModel(store, false)
+	m, _ = m.TriggerAction("new-connection")
+
+	if m.formType != config.ConnTypeOpenClaw {
+		t.Fatalf("expected initial type OpenClaw, got %q", m.formType)
+	}
+
+	// Type radio is focused at index 0 — Right cycles to OpenAI.
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.formType != config.ConnTypeOpenAI {
+		t.Errorf("expected OpenAI after Right, got %q", m.formType)
+	}
+	// URL placeholder should track the selected type so the hint
+	// matches what the user is typing.
+	if !strings.Contains(m.urlInput.Placeholder, "11434") {
+		t.Errorf("URL placeholder did not update for OpenAI: %q", m.urlInput.Placeholder)
+	}
+
+	// Right again wraps back to OpenClaw.
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.formType != config.ConnTypeOpenClaw {
+		t.Errorf("expected wrap to OpenClaw, got %q", m.formType)
+	}
+}
+
+func TestConnectionsModel_OpenAITabOrderIncludesModel(t *testing.T) {
+	store := &config.Connections{}
+	m := newConnectionsModel(store, false)
+	m, _ = m.TriggerAction("new-connection")
+
+	// Switch to OpenAI so the model field joins the tab order.
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+
+	steps := []formField{formFieldName, formFieldURL, formFieldModel, formFieldType}
+	for i, want := range steps {
+		m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+		if got := m.currentField(); got != want {
+			t.Errorf("tab %d: got %v want %v", i+1, got, want)
+		}
+	}
+}
+
+func TestConnectionsModel_EditFormSkipsTypeRadio(t *testing.T) {
+	store := newSeededStore(t)
+	m := newConnectionsModel(store, false)
+	m.setSize(80, 20)
+	m.rebuildItems()
+	m.list.Select(0)
+
+	m, _ = m.TriggerAction("edit-connection")
+	if got := m.currentField(); got != formFieldName {
+		t.Errorf("edit form should start on name (type is read-only), got %v", got)
+	}
+	// Tab cycles between name and url only — no type field, no model
+	// field for an OpenClaw connection.
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := m.currentField(); got != formFieldURL {
+		t.Errorf("expected URL, got %v", got)
+	}
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := m.currentField(); got != formFieldName {
+		t.Errorf("expected wrap to name, got %v", got)
+	}
+}
+
+func TestConnectionsModel_NewOpenAIConnectionPersistsModel(t *testing.T) {
+	store := &config.Connections{}
+	m := newConnectionsModel(store, false)
+	m, _ = m.TriggerAction("new-connection")
+
+	// Switch type to OpenAI.
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+
+	m.nameInput.SetValue("local llm")
+	m.urlInput.SetValue("http://localhost:11434/v1")
+	m.modelInput.SetValue("llama3.2")
+
+	m, _ = m.submitForm()
+	if m.formErr != "" {
+		t.Fatalf("submit error: %s", m.formErr)
+	}
+	if len(store.Connections) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(store.Connections))
+	}
+	got := store.Connections[0]
+	if got.Type != config.ConnTypeOpenAI {
+		t.Errorf("Type = %q", got.Type)
+	}
+	if got.DefaultModel != "llama3.2" {
+		t.Errorf("DefaultModel = %q", got.DefaultModel)
+	}
+}
+
+func TestConnectionsModel_NewFormRendersOnlyRelevantFields(t *testing.T) {
+	store := &config.Connections{}
+	m := newConnectionsModel(store, false)
+	m, _ = m.TriggerAction("new-connection")
+
+	// OpenClaw form: no model field rendered.
+	out := m.viewForm()
+	if strings.Contains(out, "Default model") {
+		t.Errorf("OpenClaw form should not render model field, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Gateway URL") {
+		t.Errorf("OpenClaw form should label URL as Gateway URL, got:\n%s", out)
+	}
+
+	// Switch to OpenAI: model field appears, URL relabels.
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	out = m.viewForm()
+	if !strings.Contains(out, "Default model") {
+		t.Errorf("OpenAI form missing model field, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Base URL") {
+		t.Errorf("OpenAI form missing Base URL label, got:\n%s", out)
+	}
+	if strings.Contains(out, "Gateway URL") {
+		t.Errorf("OpenAI form should not show Gateway URL label, got:\n%s", out)
+	}
+}
+
 func TestConnectionsModel_TabAdvancesFocus(t *testing.T) {
 	store := &config.Connections{}
 	m := newConnectionsModel(store, false)

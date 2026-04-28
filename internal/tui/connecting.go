@@ -32,6 +32,7 @@ type connectingModel struct {
 	connection *config.Connection
 	backend    backend.Backend
 	subState   connectingSubState
+	authNeed   authRecovery // which recovery flow is active in subStateAuthTokenPrompt
 	hideHints  bool
 
 	tokenInput textinput.Model
@@ -56,6 +57,7 @@ func (m *connectingModel) enterAuthModal(conn *config.Connection, b backend.Back
 	m.connection = conn
 	m.backend = b
 	m.authErr = err
+	m.authNeed = need
 	switch need {
 	case authRecoveryTokenMismatch:
 		m.subState = subStateAuthMismatchPrompt
@@ -136,15 +138,26 @@ func (m connectingModel) handleKey(msg tea.KeyPressMsg) (connectingModel, tea.Cm
 			}
 			b := m.backend
 			conn := m.connection
+			need := m.authNeed
 			return m, func() tea.Msg {
-				switch auth := b.(type) {
-				case backend.DeviceTokenAuth:
-					if err := auth.StoreToken(token); err != nil {
-						return connectResultMsg{connection: conn, err: fmt.Errorf("store token: %w", err)}
+				// Dispatch on the modal's recovery type rather than
+				// on backend interface assertion: a single backend
+				// can implement both DeviceTokenAuth and APIKeyAuth
+				// (the OpenClaw fake does), and a type-switch would
+				// always pick the first arm regardless of which
+				// flow the user is actually in.
+				switch need {
+				case authRecoveryAPIKey:
+					if auth, ok := b.(backend.APIKeyAuth); ok {
+						if err := auth.StoreAPIKey(token); err != nil {
+							return connectResultMsg{connection: conn, err: fmt.Errorf("store api key: %w", err)}
+						}
 					}
-				case backend.APIKeyAuth:
-					if err := auth.StoreAPIKey(token); err != nil {
-						return connectResultMsg{connection: conn, err: fmt.Errorf("store api key: %w", err)}
+				default:
+					if auth, ok := b.(backend.DeviceTokenAuth); ok {
+						if err := auth.StoreToken(token); err != nil {
+							return connectResultMsg{connection: conn, err: fmt.Errorf("store token: %w", err)}
+						}
 					}
 				}
 				return authResolvedMsg{connection: conn, backend: b}

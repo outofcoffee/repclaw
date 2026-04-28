@@ -271,7 +271,10 @@ func (m *connectionsModel) enterFormForEdit(conn config.Connection) {
 	m.editingID = conn.ID
 	m.formErr = ""
 	m.formType = conn.Type
-	m.focusedField = 1 // skip the type radio — it's read-only on edit
+	// Edit forms drop the type radio from formFields() entirely
+	// (type is immutable post-create), so the name field sits at
+	// index 0 of the focus order.
+	m.focusedField = 0
 
 	m.nameInput = textinput.New()
 	m.nameInput.SetValue(conn.Name)

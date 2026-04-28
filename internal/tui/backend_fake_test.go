@@ -23,6 +23,19 @@ import (
 type fakeBackend struct {
 	events chan protocol.Event
 	caps   backend.Capabilities
+
+	// connectErr, when set, is returned from Connect so tests can
+	// drive the connecting view's auth-modal recovery branches by
+	// pre-seeding "gateway token mismatch" / "gateway token missing"
+	// / "api key required" text.
+	connectErr error
+
+	// Recorded auth-modal calls — exposed to tests so they can assert
+	// the right path was taken (clear vs reset vs store).
+	storedToken    string
+	storedAPIKey   string
+	clearedToken   bool
+	resetIdentity  bool
 }
 
 func newFakeBackend() *fakeBackend {
@@ -39,7 +52,7 @@ func newFakeBackend() *fakeBackend {
 	}
 }
 
-func (f *fakeBackend) Connect(ctx context.Context) error  { return nil }
+func (f *fakeBackend) Connect(ctx context.Context) error  { return f.connectErr }
 func (f *fakeBackend) Close() error                       { return nil }
 func (f *fakeBackend) Events() <-chan protocol.Event      { return f.events }
 func (f *fakeBackend) Supervise(ctx context.Context, notify func(client.ConnState)) {
@@ -108,9 +121,17 @@ func (f *fakeBackend) SessionUsage(ctx context.Context, sessionKey string) (json
 
 // --- DeviceTokenAuth ---
 
-func (f *fakeBackend) StoreToken(token string) error { return nil }
-func (f *fakeBackend) ClearToken() error             { return nil }
-func (f *fakeBackend) ResetIdentity() error          { return nil }
+func (f *fakeBackend) StoreToken(token string) error { f.storedToken = token; return nil }
+func (f *fakeBackend) ClearToken() error             { f.clearedToken = true; return nil }
+func (f *fakeBackend) ResetIdentity() error          { f.resetIdentity = true; return nil }
+
+// --- APIKeyAuth ---
+//
+// fakeBackend implements both DeviceTokenAuth and APIKeyAuth so a
+// single fake can drive either modal flow; tests opt in by setting
+// caps.AuthRecovery.
+
+func (f *fakeBackend) StoreAPIKey(key string) error { f.storedAPIKey = key; return nil }
 
 // Compile-time assertions.
 var (
@@ -121,4 +142,5 @@ var (
 	_ backend.ThinkingBackend = (*fakeBackend)(nil)
 	_ backend.UsageBackend    = (*fakeBackend)(nil)
 	_ backend.DeviceTokenAuth = (*fakeBackend)(nil)
+	_ backend.APIKeyAuth      = (*fakeBackend)(nil)
 )

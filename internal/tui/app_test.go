@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"runtime"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -147,6 +148,86 @@ func TestNewApp_ManagedWithInitialStartsAtConnecting(t *testing.T) {
 	})
 	if m.state != viewConnecting {
 		t.Errorf("managed-with-initial should start at viewConnecting, got %v", m.state)
+	}
+}
+
+// TestAppModel_TabAdvancesFocusInConnectionsForm: end-to-end check
+// that Tab in the connections form actually advances focus when
+// routed through AppModel.Update. This guards against the value-vs-
+// pointer-receiver bug where mutations got lost on the way back up
+// the call chain.
+func TestAppModel_TabAdvancesFocusInConnectionsForm(t *testing.T) {
+	store := &config.Connections{}
+	m := NewApp(nil, AppOptions{
+		Store:          store,
+		BackendFactory: func(*config.Connection) (backend.Backend, error) { return nil, nil },
+	})
+	if m.state != viewConnections {
+		t.Fatalf("expected viewConnections, got %v", m.state)
+	}
+
+	// Open the new-connection form via the action mechanism so the
+	// path matches what the inline-help "n" key triggers.
+	next, _ := m.TriggerAction("new-connection")
+	m = next
+	if m.connectionsModel.subState != subStateConnForm {
+		t.Fatalf("expected form sub-state, got %v", m.connectionsModel.subState)
+	}
+	if got := m.connectionsModel.currentField(); got != formFieldType {
+		t.Fatalf("expected initial focus on type radio, got %v", got)
+	}
+
+	// One Tab advances to name, two to URL — through AppModel.Update.
+	for _, want := range []formField{formFieldName, formFieldURL} {
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		m = updated.(AppModel)
+		if got := m.connectionsModel.currentField(); got != want {
+			t.Fatalf("Tab through AppModel.Update did not advance focus: got %v want %v", got, want)
+		}
+	}
+}
+
+// TestAppModel_RoutesShowConnectionsMsg: /connections from the chat
+// view tears down the active backend and transitions to the picker.
+// Mid-session switching is the whole point of the connections feature
+// — regressing this would be silent.
+func TestAppModel_RoutesShowConnectionsMsg(t *testing.T) {
+	store := &config.Connections{}
+	conn, _ := store.Add(config.ConnectionFields{Name: "home", Type: config.ConnTypeOpenClaw, URL: "https://home.example.com"})
+	store.MarkUsed(conn.ID)
+
+	var publishedNil bool
+	m := NewApp(nil, AppOptions{
+		Store: store,
+		BackendFactory: func(*config.Connection) (backend.Backend, error) {
+			return newFakeBackend(), nil
+		},
+		OnBackendChanged: func(b backend.Backend) {
+			if b == nil {
+				publishedNil = true
+			}
+		},
+	})
+	// Pretend we already connected so showConnectionsMsg has work to
+	// do (tear down + close the active backend).
+	m.backend = newFakeBackend()
+	m.state = viewChat
+
+	updated, _ := m.Update(showConnectionsMsg{})
+	m = updated.(AppModel)
+	if m.state != viewConnections {
+		t.Errorf("expected viewConnections after /connections, got %v", m.state)
+	}
+	if m.backend != nil {
+		t.Errorf("expected backend cleared, got %T", m.backend)
+	}
+	// The OnBackendChanged callback runs in a goroutine — give it a
+	// turn to fire. A short blocking nudge is fine for a unit test.
+	for i := 0; i < 50 && !publishedNil; i++ {
+		runtime.Gosched()
+	}
+	if !publishedNil {
+		t.Error("expected OnBackendChanged(nil) to publish backend tear-down")
 	}
 }
 
