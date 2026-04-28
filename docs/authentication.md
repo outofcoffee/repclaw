@@ -1,10 +1,12 @@
 # Authentication
 
-Lucinate authenticates to the OpenClaw gateway using device pairing. There are no usernames or passwords — each device generates a persistent Ed25519 keypair and an administrator approves it on the gateway.
+This document covers OpenClaw device pairing — the auth flow used by the OpenClaw backend. The OpenAI-compatible backend uses a simpler bearer-token model documented in [connections.md](connections.md#auth-recovery-modals) and [connections.md](connections.md#secrets-storage).
+
+For OpenClaw connections, lucinate authenticates using device pairing — no usernames or passwords. Each device generates a persistent Ed25519 keypair and an administrator approves it on the gateway.
 
 ## Configuration
 
-Gateway URLs can be added via the connections picker (the default UX) or via `OPENCLAW_GATEWAY_URL`, which is auto-added on first run. See [connections.md](connections.md#startup-decision-tree) for the full resolution order.
+OpenClaw URLs can be added via the connections picker (the default UX) or via `OPENCLAW_GATEWAY_URL` (auto-added on first run). See [connections.md](connections.md#startup-decision-tree) for the resolution order.
 
 ```
 OPENCLAW_GATEWAY_URL=https://your-gateway-host

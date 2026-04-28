@@ -1,6 +1,8 @@
 # Agent picker
 
-The agent picker (`selectModel` in `internal/tui/select.go`) is shown after a connection is established — either directly on startup when the connection is unambiguous, or after the user picks one from the connections picker (see [connections.md](connections.md)). It loads the list of configured agents and either presents a selection UI or auto-selects when only one agent exists.
+The agent picker (`selectModel` in `internal/tui/select.go`) is shown after a connection is established — either directly on startup when the connection is unambiguous, or after the user picks one from the connections picker (see [connections.md](connections.md)). It loads the list of configured agents and either presents a selection UI or auto-selects when only one agent exists. In managed mode the picker also surfaces a **Connections** action (key `c`) so the user can switch connection without first entering chat.
+
+Agents come from the active backend (`backend.Backend.ListAgents`). For OpenClaw, that's the gateway's agent list. For OpenAI-compatible connections, agents are local — see [connections.md](connections.md#openai-agent-storage).
 
 ## Loading agents
 

@@ -6,6 +6,7 @@ This directory contains maintainer-level documentation for lucinate. It covers h
 
 | Document | Covers |
 |---|---|
+| [connections.md](connections.md) | Connection types (OpenClaw, OpenAI-compat), picker, startup decision tree, capability negotiation, secrets, agent storage |
 | [authentication.md](authentication.md) | Device pairing, Ed25519 identity, gateway connection and token lifecycle |
 | [connections.md](connections.md) | Connections picker, persisted connection store, startup decision tree, lifecycle |
 | [agents.md](agents.md) | Agent picker, auto-selection, agent creation |

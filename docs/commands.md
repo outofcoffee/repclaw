@@ -17,7 +17,7 @@ Unrecognised slash commands fall through to a skill-name lookup. If no skill mat
 | `/clear` | Wipe `m.messages` from the local display (does not affect gateway history) |
 | `/compact` | Compact the session context — see [sessions.md](sessions.md#compact-and-reset) |
 | `/config` | Open the preferences view by emitting `showConfigMsg{}` |
-| `/connections` | Open the connections picker mid-session, tearing down the active client — see [connections.md](connections.md) |
+| `/connections` | Open the connections picker mid-session, tearing down the active backend — see [connections.md](connections.md) |
 | `/exit`, `/quit` | Exit via `tea.Quit` |
 | `/help`, `/commands` | Print static help text; appends skill count if any are loaded |
 | `/model` | List available models |
