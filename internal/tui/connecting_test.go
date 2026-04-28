@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lucinate-ai/lucinate/internal/backend"
 	"github.com/lucinate-ai/lucinate/internal/config"
 )
 
@@ -48,6 +49,106 @@ func TestConnectingModel_AuthTokenPromptShowsInput(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "pre-shared auth token") {
 		t.Errorf("view missing token prompt:\n%s", m.View())
+	}
+}
+
+func TestConnectingModel_AuthMismatchClearTokenCallsBackend(t *testing.T) {
+	conn := &config.Connection{Name: "home", URL: "https://home.example.com"}
+	fake := newFakeBackend()
+	m := newConnectingModel(conn, false)
+	m.enterAuthModal(conn, fake, authRecoveryTokenMismatch, errors.New("gateway token mismatch"))
+
+	// "1" / Enter → clear token & retry.
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: '1', Text: "1"})
+	if cmd == nil {
+		t.Fatal("expected cmd from clear-token choice")
+	}
+	msg := cmd()
+	if !fake.clearedToken {
+		t.Error("expected ClearToken to be called")
+	}
+	resolved, ok := msg.(authResolvedMsg)
+	if !ok {
+		t.Fatalf("expected authResolvedMsg, got %T", msg)
+	}
+	if resolved.cancelled {
+		t.Error("clear-token should not be a cancellation")
+	}
+}
+
+func TestConnectingModel_AuthMismatchResetIdentityCallsBackend(t *testing.T) {
+	conn := &config.Connection{Name: "home", URL: "https://home.example.com"}
+	fake := newFakeBackend()
+	m := newConnectingModel(conn, false)
+	m.enterAuthModal(conn, fake, authRecoveryTokenMismatch, errors.New("gateway token mismatch"))
+
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: '2', Text: "2"})
+	if cmd == nil {
+		t.Fatal("expected cmd from reset-identity choice")
+	}
+	cmd()
+	if !fake.resetIdentity {
+		t.Error("expected ResetIdentity to be called")
+	}
+}
+
+func TestConnectingModel_TokenPromptStoresOnDeviceAuth(t *testing.T) {
+	conn := &config.Connection{Name: "home", URL: "https://home.example.com"}
+	fake := newFakeBackend()
+	m := newConnectingModel(conn, false)
+	m.enterAuthModal(conn, fake, authRecoveryTokenMissing, errors.New("gateway token missing"))
+
+	m.tokenInput.SetValue("pre-shared-token")
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected cmd from Enter")
+	}
+	cmd()
+	if fake.storedToken != "pre-shared-token" {
+		t.Errorf("StoreToken not called with submitted value, got %q", fake.storedToken)
+	}
+}
+
+func TestConnectingModel_APIKeyPromptStoresOnAPIKeyAuth(t *testing.T) {
+	conn := &config.Connection{Name: "openai", URL: "http://localhost:11434/v1"}
+	fake := newFakeBackend()
+	fake.caps.AuthRecovery = backend.AuthRecoveryAPIKey
+	m := newConnectingModel(conn, false)
+	m.enterAuthModal(conn, fake, authRecoveryAPIKey, errors.New("api key required"))
+
+	if !strings.Contains(m.View(), "pre-shared auth token") {
+		// The shared token-prompt copy is reused; the modal still
+		// renders the same prompt regardless of recovery type.
+		t.Logf("token prompt copy: %q", m.View())
+	}
+
+	m.tokenInput.SetValue("sk-test-123")
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected cmd from Enter")
+	}
+	cmd()
+	if fake.storedAPIKey != "sk-test-123" {
+		t.Errorf("StoreAPIKey not called with submitted value, got %q", fake.storedAPIKey)
+	}
+	if fake.storedToken != "" {
+		t.Errorf("StoreToken should not be called for API-key flow, got %q", fake.storedToken)
+	}
+}
+
+func TestConnectingModel_TokenPromptIgnoresEmpty(t *testing.T) {
+	conn := &config.Connection{Name: "home", URL: "https://home.example.com"}
+	fake := newFakeBackend()
+	m := newConnectingModel(conn, false)
+	m.enterAuthModal(conn, fake, authRecoveryTokenMissing, errors.New("gateway token missing"))
+
+	// Empty input + Enter — no cmd, no store.
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Errorf("expected no cmd for empty submit, got %T", cmd)
+	}
+	if fake.storedToken != "" {
+		t.Errorf("StoreToken should not be called on empty submit, got %q", fake.storedToken)
 	}
 }
 
