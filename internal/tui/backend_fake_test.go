@@ -43,11 +43,13 @@ type fakeBackend struct {
 	cronRuns        []protocol.CronRunLogEntry
 	cronListErr     error
 	cronRunsErr     error
-	lastCronAdd     *protocol.CronAddParams
-	lastCronUpdate  *protocol.CronUpdateParams
-	lastCronRunID   string
-	lastCronRunForce bool
-	cronRemoved     []string
+	lastCronAdd       *protocol.CronAddParams
+	lastCronUpdate    *protocol.CronUpdateParams
+	lastCronUpdateRaw map[string]any
+	lastCronUpdateID  string
+	lastCronRunID     string
+	lastCronRunForce  bool
+	cronRemoved       []string
 }
 
 func newFakeBackend() *fakeBackend {
@@ -172,6 +174,12 @@ func (f *fakeBackend) CronAdd(ctx context.Context, params protocol.CronAddParams
 func (f *fakeBackend) CronUpdate(ctx context.Context, params protocol.CronUpdateParams) error {
 	p := params
 	f.lastCronUpdate = &p
+	return nil
+}
+
+func (f *fakeBackend) CronUpdateRaw(ctx context.Context, jobID string, patch map[string]any) error {
+	f.lastCronUpdateID = jobID
+	f.lastCronUpdateRaw = patch
 	return nil
 }
 

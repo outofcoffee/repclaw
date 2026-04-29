@@ -424,6 +424,27 @@ func (c *Client) CronUpdate(ctx context.Context, params protocol.CronUpdateParam
 	return c.currentGW().CronUpdate(ctx, params)
 }
 
+// CronUpdateRaw updates an existing cron job using a raw patch map.
+// This bypasses the protocol.CronJobPatch struct so callers can express
+// "explicitly clear this string field" — the typed struct uses
+// `omitempty` on string fields, which makes an empty value
+// indistinguishable from "field not provided" once it hits the wire.
+// The form-edit flow uses this so clearing the model or description
+// fields actually persists.
+func (c *Client) CronUpdateRaw(ctx context.Context, jobID string, patch map[string]any) error {
+	resp, err := c.currentGW().Send(ctx, string(protocol.MethodCronUpdate), map[string]any{
+		"id":    jobID,
+		"patch": patch,
+	})
+	if err != nil {
+		return fmt.Errorf("cron update: %w", err)
+	}
+	if !resp.OK && resp.Error != nil {
+		return fmt.Errorf("cron update: %s: %s", resp.Error.Code, resp.Error.Message)
+	}
+	return nil
+}
+
 // CronRemove deletes a cron job.
 func (c *Client) CronRemove(ctx context.Context, jobID string) error {
 	return c.currentGW().CronRemove(ctx, protocol.CronRemoveParams{ID: jobID})

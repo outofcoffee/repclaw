@@ -1011,13 +1011,10 @@ func (m cronsModel) submitForm() (cronsModel, tea.Cmd) {
 	form := m.form
 
 	if form.mode == "edit" {
-		patch := buildJobPatch(form)
+		patch := buildJobPatchMap(form)
 		jobID := form.editingID
 		return m, func() tea.Msg {
-			err := cron.CronUpdate(context.Background(), protocol.CronUpdateParams{
-				ID:    jobID,
-				Patch: patch,
-			})
+			err := cron.CronUpdateRaw(context.Background(), jobID, patch)
 			return cronJobSavedMsg{jobID: jobID, err: err}
 		}
 	}
@@ -1055,29 +1052,41 @@ func buildAddParams(f cronForm) protocol.CronAddParams {
 	return params
 }
 
-func buildJobPatch(f cronForm) protocol.CronJobPatch {
-	patch := protocol.CronJobPatch{
-		Name:          f.name.Value(),
-		Description:   f.description.Value(),
-		SessionTarget: f.sessionTarget,
-		WakeMode:      f.wakeMode,
-		Schedule: &protocol.CronSchedule{
-			Kind: "cron",
-			Expr: f.cronExpr.Value(),
-			Tz:   f.timezone.Value(),
+// buildJobPatchMap renders the form as a wire-level map for
+// CronUpdateRaw. We avoid the typed CronJobPatch here because every
+// string field on it is `omitempty` — once Go marshals the struct,
+// "" becomes indistinguishable from "not provided", and the gateway
+// silently retains the prior value. Sending a literal map preserves
+// the user's intent to clear a field.
+func buildJobPatchMap(f cronForm) map[string]any {
+	patch := map[string]any{
+		"name":          f.name.Value(),
+		"description":   f.description.Value(),
+		"sessionTarget": f.sessionTarget,
+		"wakeMode":      f.wakeMode,
+		"schedule": map[string]any{
+			"kind": "cron",
+			"expr": f.cronExpr.Value(),
+			"tz":   f.timezone.Value(),
 		},
-		Payload: &protocol.CronPayload{
-			Kind:  "agentTurn",
-			Text:  f.payloadText.Value(),
-			Model: f.model.Value(),
+		"payload": map[string]any{
+			"kind":  "agentTurn",
+			"text":  f.payloadText.Value(),
+			"model": f.model.Value(),
 		},
-		Delivery: buildDelivery(f),
+		"agentId": f.agentID.Value(),
+		"enabled": f.enabled,
 	}
-	if v := f.agentID.Value(); v != "" {
-		patch.AgentID = &v
+	if d := buildDelivery(f); d != nil {
+		patch["delivery"] = map[string]any{
+			"mode":    d.Mode,
+			"channel": d.Channel,
+			"to":      d.To,
+		}
+	} else {
+		// mode=none clears delivery on the wire too.
+		patch["delivery"] = map[string]any{"mode": "none"}
 	}
-	enabled := f.enabled
-	patch.Enabled = &enabled
 	return patch
 }
 

@@ -242,6 +242,86 @@ func TestCronsForm_BuildDelivery_NoneReturnsNil(t *testing.T) {
 	}
 }
 
+func TestCronsForm_BuildJobPatchMap_ClearsModelAndDescription(t *testing.T) {
+	f := newCreateForm()
+	f.editingID = "job-1"
+	f.mode = "edit"
+	f.name.SetValue("Renamed")
+	// description and model are intentionally left empty to simulate
+	// the user clearing them in the edit form.
+	f.cronExpr.SetValue("0 9 * * *")
+	f.timezone.SetValue("UTC")
+	f.agentID.SetValue("agent-1")
+	f.payloadText.SetValue("Do thing.")
+	f.sessionTarget = "isolated"
+	f.wakeMode = "now"
+	f.deliveryMode = "none"
+	f.enabled = true
+
+	patch := buildJobPatchMap(f)
+
+	if got := patch["description"]; got != "" {
+		t.Errorf("expected description to be present and empty, got %#v", got)
+	}
+	payload, ok := patch["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected payload map, got %T", patch["payload"])
+	}
+	if got, ok := payload["model"]; !ok {
+		t.Errorf("expected payload.model key to be present in patch")
+	} else if got != "" {
+		t.Errorf("expected payload.model='', got %#v", got)
+	}
+	delivery, ok := patch["delivery"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected delivery map, got %T", patch["delivery"])
+	}
+	if delivery["mode"] != "none" {
+		t.Errorf("expected delivery.mode=none, got %#v", delivery["mode"])
+	}
+}
+
+func TestCronsForm_EditSubmitUsesRawUpdate(t *testing.T) {
+	m, fake := newTestCronsModel(t)
+	jobs := []protocol.CronJob{{
+		ID:            "job-1",
+		Name:          "Old name",
+		AgentID:       "agent-1",
+		Enabled:       true,
+		SessionTarget: "isolated",
+		WakeMode:      "now",
+		Schedule:      protocol.CronSchedule{Kind: "cron", Expr: "0 9 * * *"},
+		Payload:       protocol.CronPayload{Kind: "agentTurn", Text: "old text", Model: "haiku-4-5"},
+	}}
+	m, _ = m.Update(cronsLoadedMsg{jobs: jobs})
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})  // open detail
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: 'e', Text: "e"}) // open edit form
+	if m.subset != cronSubForm {
+		t.Fatalf("expected form substate, got %v", m.subset)
+	}
+	// Clear the model value, simulating the user emptying the field.
+	m.form.model.SetValue("")
+
+	_, cmd := m.submitForm()
+	if cmd == nil {
+		t.Fatal("expected a save cmd")
+	}
+	cmd()
+
+	if fake.lastCronUpdateID != "job-1" {
+		t.Errorf("lastCronUpdateID: %q", fake.lastCronUpdateID)
+	}
+	payload, ok := fake.lastCronUpdateRaw["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected payload map in raw patch, got %T", fake.lastCronUpdateRaw["payload"])
+	}
+	if model, present := payload["model"]; !present {
+		t.Errorf("expected payload.model key on the wire even when empty")
+	} else if model != "" {
+		t.Errorf("expected payload.model=\"\", got %#v", model)
+	}
+}
+
 func TestCronsForm_PrePopulatesModelAndDelivery(t *testing.T) {
 	job := protocol.CronJob{
 		ID:            "job-1",

@@ -217,6 +217,10 @@ func (b *Backend) CronUpdate(ctx context.Context, params protocol.CronUpdatePara
 	return b.client.CronUpdate(ctx, params)
 }
 
+func (b *Backend) CronUpdateRaw(ctx context.Context, jobID string, patch map[string]any) error {
+	return b.client.CronUpdateRaw(ctx, jobID, patch)
+}
+
 func (b *Backend) CronRemove(ctx context.Context, jobID string) error {
 	return b.client.CronRemove(ctx, jobID)
 }

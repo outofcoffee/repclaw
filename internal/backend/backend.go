@@ -260,6 +260,12 @@ type CronBackend interface {
 	CronRuns(ctx context.Context, params protocol.CronRunsParams) (*protocol.CronRunsResult, error)
 	CronAdd(ctx context.Context, params protocol.CronAddParams) (json.RawMessage, error)
 	CronUpdate(ctx context.Context, params protocol.CronUpdateParams) error
+	// CronUpdateRaw is a low-level patch entry used by the edit form so
+	// cleared string fields actually round-trip — the typed CronJobPatch
+	// uses `omitempty` and would otherwise drop empty values before they
+	// reach the gateway. The toggle path stays on the typed CronUpdate
+	// because it only mutates a *bool field.
+	CronUpdateRaw(ctx context.Context, jobID string, patch map[string]any) error
 	CronRemove(ctx context.Context, jobID string) error
 	CronRun(ctx context.Context, jobID string, force bool) error
 }
