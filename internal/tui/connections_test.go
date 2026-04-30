@@ -207,7 +207,21 @@ func TestConnectionsModel_TypeCycleUpdatesPreset(t *testing.T) {
 		t.Errorf("Ollama preset did not prefill name: %q", m.nameInput.Value())
 	}
 
-	// Right again wraps back to OpenClaw and clears the Ollama
+	// Right again advances Ollama → Hermes, clears the Ollama
+	// prefill, and prefills the Hermes URL/name so the user isn't
+	// stuck with localhost in the wrong field.
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.formPreset != presetHermes {
+		t.Errorf("expected Hermes after third Right, got %v", m.formPreset)
+	}
+	if m.urlInput.Value() != "http://127.0.0.1:8642/v1" {
+		t.Errorf("Hermes preset did not prefill URL: %q", m.urlInput.Value())
+	}
+	if m.nameInput.Value() != "hermes" {
+		t.Errorf("Hermes preset did not prefill name: %q", m.nameInput.Value())
+	}
+
+	// Right again wraps back to OpenClaw and clears the Hermes
 	// prefill so the user isn't stuck with localhost in a gateway
 	// URL field.
 	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
@@ -215,10 +229,10 @@ func TestConnectionsModel_TypeCycleUpdatesPreset(t *testing.T) {
 		t.Errorf("expected wrap to OpenClaw, got %v", m.formPreset)
 	}
 	if m.urlInput.Value() != "" {
-		t.Errorf("expected URL cleared on switch away from Ollama, got %q", m.urlInput.Value())
+		t.Errorf("expected URL cleared on switch away from Hermes, got %q", m.urlInput.Value())
 	}
 	if m.nameInput.Value() != "" {
-		t.Errorf("expected name cleared on switch away from Ollama, got %q", m.nameInput.Value())
+		t.Errorf("expected name cleared on switch away from Hermes, got %q", m.nameInput.Value())
 	}
 }
 
@@ -254,6 +268,43 @@ func TestConnectionsModel_OllamaPresetPersistsAsOpenAI(t *testing.T) {
 		t.Errorf("Name = %q", got.Name)
 	}
 	if got.DefaultModel != "qwen2.5:0.5b" {
+		t.Errorf("DefaultModel = %q", got.DefaultModel)
+	}
+}
+
+func TestConnectionsModel_HermesPresetPersistsAsHermes(t *testing.T) {
+	store := &config.Connections{}
+	m := newConnectionsModel(store, false)
+	m, _ = m.TriggerAction("new-connection")
+	m = focusTypeRadio(m)
+
+	// OpenClaw → OpenAI → Ollama → Hermes.
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.formPreset != presetHermes {
+		t.Fatalf("expected Hermes preset, got %v", m.formPreset)
+	}
+
+	m.modelInput.SetValue("hermes-agent")
+	m, _ = m.submitForm()
+	if m.formErr != "" {
+		t.Fatalf("submit error: %s", m.formErr)
+	}
+	if len(store.Connections) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(store.Connections))
+	}
+	got := store.Connections[0]
+	if got.Type != config.ConnTypeHermes {
+		t.Errorf("Hermes preset should persist as Hermes, got %q", got.Type)
+	}
+	if got.URL != "http://127.0.0.1:8642/v1" {
+		t.Errorf("URL = %q", got.URL)
+	}
+	if got.Name != "hermes" {
+		t.Errorf("Name = %q", got.Name)
+	}
+	if got.DefaultModel != "hermes-agent" {
 		t.Errorf("DefaultModel = %q", got.DefaultModel)
 	}
 }

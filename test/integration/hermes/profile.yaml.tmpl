@@ -1,0 +1,16 @@
+# Seed config.yaml for the Hermes integration-test container. The
+# entrypoint copies cli-config.yaml.example → $HERMES_HOME/config.yaml
+# only if no config exists, so by mounting state/ with this file in
+# place we control which provider Hermes uses.
+#
+# setup-hermes.sh substitutes __MODEL__ with the value of $MODEL before
+# writing this to state/config.yaml.
+model:
+  default: "__MODEL__"
+  # "custom" routes through any OpenAI-compatible base URL — the
+  # ollama/vllm/llamacpp aliases all map to this same code path.
+  provider: "custom"
+  base_url: "http://host.docker.internal:11434/v1"
+  # Ollama doesn't validate the bearer token but Hermes requires the
+  # field to be set before it'll route to a custom provider.
+  api_key: "ollama-local"

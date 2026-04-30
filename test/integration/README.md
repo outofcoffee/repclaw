@@ -301,3 +301,139 @@ The OpenAI integration tests live in
 - `SessionPatchModel` persists to disk
 - Local agent state is written under a `t.TempDir()`-scoped HOME so the
   tests don't pollute `~/.lucinate/agents/`
+
+---
+
+## Hermes (Nous Research)
+
+Exercises lucinate's Hermes backend against a real Hermes API server
+running in Docker, with inference routed to host-side Ollama via
+`host.docker.internal`. Docker isolates the Hermes process and its
+profile state from any locally-running Hermes the developer may have.
+
+```
+┌──────────────── macOS host ─────────────────┐
+│                                             │
+│  go test -tags integration_hermes           │
+│      │                                      │
+│      ▼ http://localhost:18642/v1            │
+│  ┌──────────────────────┐                   │
+│  │ Hermes API server    │ ← Docker          │
+│  │ (built from pinned   │                   │
+│  │  upstream tag)       │                   │
+│  └──────────┬───────────┘                   │
+│             │ http://host.docker.internal   │
+│             ▼                               │
+│  Ollama (Metal-accelerated on host)         │
+│  Model: qwen2.5:0.5b (default)              │
+└─────────────────────────────────────────────┘
+```
+
+Host port `18642` is mapped to the container's `8642` so this harness
+can run alongside a developer's locally-running Hermes on its default
+port.
+
+### Prerequisites
+
+| Requirement     | Install                                     |
+|-----------------|---------------------------------------------|
+| Docker Desktop  | https://docker.com/products/docker-desktop/ |
+| Ollama          | `brew install ollama`                       |
+| jq              | `brew install jq`                           |
+| Go 1.22+        | https://go.dev/dl/                          |
+
+### Quick start
+
+```bash
+make test-integration-hermes-setup     # slow first time — see below
+make test-integration-hermes
+make test-integration-hermes-teardown
+```
+
+**First run takes several minutes.** The setup builds the Hermes image
+locally: clones a pinned upstream tag, installs Node + Playwright
+Chromium + a Python venv with all extras. Subsequent runs use the
+Docker layer cache and bring the container up in seconds.
+
+### Pinning the Hermes version
+
+The image is built from a pinned upstream git tag to bound config-
+schema drift. The default lives in two places (kept in sync):
+
+1. `test/integration/setup-hermes.sh` — `HERMES_REF` default at the top
+2. `test/integration/hermes/docker-compose.yml` — `HERMES_REF` build arg
+   default
+
+Override on the command line:
+
+```bash
+HERMES_REF=v2026.4.16 make test-integration-hermes-setup
+```
+
+### Choosing a different model
+
+```bash
+MODEL=llama3.2:1b make test-integration-hermes-setup
+```
+
+Same model table as the OpenAI section above applies — Hermes routes
+inference at the host's Ollama via `provider: "custom"` in the seeded
+`config.yaml`.
+
+### What `setup-hermes.sh` does
+
+1. Checks prereqs (Docker, jq, Go, Ollama, curl).
+2. Starts host Ollama if not running and pulls the test model.
+3. Warms the model so the first chat turn isn't paying lazy-load cost.
+4. Seeds `test/integration/hermes/state/config.yaml` from
+   `profile.yaml.tmpl` with the chosen model. The Hermes entrypoint
+   only writes a default `config.yaml` if none exists, so this preempts
+   the interactive `hermes setup` flow.
+5. `docker compose up -d --build` against
+   `test/integration/hermes/docker-compose.yml`.
+6. Waits on the container's healthcheck (`/v1/health` with the seeded
+   bearer token).
+7. Runs the Go probe to verify the backend wiring end-to-end.
+8. Writes `.env.hermes` with the env vars the integration tests read.
+
+### What `teardown-hermes.sh` does
+
+1. `docker compose down -v` on the Hermes compose file (volumes are
+   removed; only the host bind-mount under `state/` is named volume-
+   adjacent — see step 2).
+2. Removes `test/integration/hermes/state/` (the seeded config and any
+   state Hermes wrote there).
+3. Removes `.env.hermes`.
+
+Host Ollama is left running.
+
+### Troubleshooting
+
+```bash
+# Hermes container logs
+docker compose -f test/integration/hermes/docker-compose.yml logs hermes
+
+# Probe the API server manually
+curl -fsS -H 'Authorization: Bearer lucinate-integration-test' \
+    http://localhost:18642/v1/health
+
+# Force a clean rebuild (e.g. after bumping HERMES_REF)
+make test-integration-hermes-teardown
+docker compose -f test/integration/hermes/docker-compose.yml build --no-cache
+make test-integration-hermes-setup
+```
+
+### Test scope
+
+The Hermes integration tests live in
+`internal/backend/hermes/integration_test.go` under the
+`//go:build integration_hermes` build tag. They exercise the same
+protocol-level surface as the OpenAI suite (the Hermes backend embeds
+`*openai.Backend`), against the Docker-isolated Hermes API server:
+
+- `Connect` against the live endpoint
+- `ModelsList` returns at least one model
+- `ChatSend` streams deltas and lands on a `final` event, with history
+  read back through `ChatHistory`
+- `ChatAbort` mid-stream emits an `aborted` event
+- Local agent state is written under a `t.TempDir()`-scoped HOME
