@@ -22,10 +22,11 @@ model:
   # the auto-detect — fine for an integration smoke test.
   context_length: 65536
 
-# The compression model runs the same context-window guardrail; when
-# we route both the primary and auxiliary paths to the same small
-# Ollama model, the auxiliary check fails too unless we override it
-# here.
+# The compression model runs the same context-window guardrail and
+# defaults to a different upstream (qwen2.5:1.5b) that we don't pull
+# in setup. Pin both the model and the override here so a single
+# pulled model satisfies both the primary and auxiliary code paths.
 auxiliary:
   compression:
+    model: "__MODEL__"
     context_length: 65536

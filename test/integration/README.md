@@ -427,13 +427,27 @@ make test-integration-hermes-setup
 
 The Hermes integration tests live in
 `internal/backend/hermes/integration_test.go` under the
-`//go:build integration_hermes` build tag. They exercise the same
-protocol-level surface as the OpenAI suite (the Hermes backend embeds
-`*openai.Backend`), against the Docker-isolated Hermes API server:
+`//go:build integration_hermes` build tag. They exercise the
+`/v1/responses` server-state path against the Docker-isolated Hermes
+API server. The Hermes backend is a sibling of (not a subclass of) the
+OpenAI backend — both share `internal/backend/httpcommon/` for the
+HTTP request builder, SSE scanner, and event emitter — so the surfaces
+look similar but the assertions differ:
 
 - `Connect` against the live endpoint
-- `ModelsList` returns at least one model
-- `ChatSend` streams deltas and lands on a `final` event, with history
-  read back through `ChatHistory`
+- `ListAgents` returns one synthetic entry (the connected profile is
+  the agent — Hermes connections don't support multi-agent CRUD)
+- `CreateAgent` is rejected with a clear error
+- `ChatSend` posts to `/v1/responses` with a named conversation,
+  streams `response.output_text.delta` events, and persists a
+  `last_response_id` pointer on `response.completed`
+- `ChatHistory` walks the `previous_response_id` chain (capped at 3
+  hops to bound first-load latency, since there's no list-by-
+  conversation endpoint upstream) and pairs server-side assistant
+  output with the client-side prompts log to reconstruct full turns
 - `ChatAbort` mid-stream emits an `aborted` event
-- Local agent state is written under a `t.TempDir()`-scoped HOME
+
+The only client-side state is a tiny per-connection
+`~/.lucinate/hermes/<connID>/` directory holding the last response
+ID and an append-only prompts log capped at 100 entries (matching
+Hermes' server-side LRU cap).

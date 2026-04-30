@@ -3,7 +3,7 @@
 // Integration tests for the Hermes backend, exercised against a real
 // Hermes API server brought up by test/integration/setup-hermes.sh.
 // Tests are protocol-level — they assert on the event state machine
-// and on-disk persistence, not on response content.
+// and on chain walking, not on response content.
 //
 // Run with:
 //
@@ -28,8 +28,7 @@ import (
 	"github.com/lucinate-ai/lucinate/internal/backend"
 )
 
-// projectRoot resolves to the repo root from this test file's path.
-// internal/backend/hermes → ../../../ = repo root.
+// projectRoot resolves to the repo root from this test file.
 func projectRoot() string {
 	_, thisFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
@@ -37,8 +36,8 @@ func projectRoot() string {
 
 // connectTestBackend builds a Backend pointed at the live Hermes API
 // server using env vars from .env.hermes. HOME is overridden to a
-// tempdir so the agent store is isolated from the developer's real
-// ~/.lucinate/agents/.
+// tempdir so the per-connection last_response_id pointer is isolated
+// from the developer's real ~/.lucinate/.
 func connectTestBackend(t *testing.T) *Backend {
 	t.Helper()
 	envFile := filepath.Join(projectRoot(), ".env.hermes")
@@ -57,7 +56,7 @@ func connectTestBackend(t *testing.T) *Backend {
 	}
 
 	b, err := New(Options{
-		ConnectionID: "test",
+		ConnectionID: "test-" + t.Name(),
 		BaseURL:      baseURL,
 		APIKey:       os.Getenv("LUCINATE_HERMES_API_KEY"),
 		DefaultModel: model,
@@ -79,38 +78,33 @@ func TestIntegration_Connect(t *testing.T) {
 	connectTestBackend(t)
 }
 
-func TestIntegration_ModelsList(t *testing.T) {
+func TestIntegration_ListAgents_ReturnsSyntheticEntry(t *testing.T) {
 	b := connectTestBackend(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	result, err := b.ModelsList(ctx)
+	res, err := b.ListAgents(context.Background())
 	if err != nil {
-		t.Fatalf("ModelsList: %v", err)
+		t.Fatalf("ListAgents: %v", err)
 	}
-	if len(result.Models) == 0 {
-		t.Fatal("expected at least one model from the live endpoint")
+	if len(res.Agents) != 1 {
+		t.Fatalf("expected exactly 1 synthetic agent, got %d", len(res.Agents))
+	}
+	if res.Agents[0].ID != syntheticAgentID {
+		t.Errorf("agent ID = %q want %q", res.Agents[0].ID, syntheticAgentID)
 	}
 }
 
-// TestIntegration_ChatSendStreams drives a full chat turn through the
-// embedded backend: agent creation, ChatSend, stream drain to a final
-// event, and ChatHistory readback. Asserts on the protocol shape, not
-// on response content (model output is non-deterministic).
+func TestIntegration_CreateAgent_Rejected(t *testing.T) {
+	b := connectTestBackend(t)
+	err := b.CreateAgent(context.Background(), backend.CreateAgentParams{Name: "anything"})
+	if err == nil {
+		t.Error("expected CreateAgent to reject on a Hermes connection")
+	}
+}
+
 func TestIntegration_ChatSendStreams(t *testing.T) {
 	b := connectTestBackend(t)
 
-	if err := b.CreateAgent(context.Background(), backend.CreateAgentParams{
-		Name:     "integration-test",
-		Identity: "You are a terse assistant.",
-		Soul:     "Reply with a single short sentence.",
-		Model:    os.Getenv("LUCINATE_HERMES_DEFAULT_MODEL"),
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	if _, err := b.ChatSend(context.Background(), "integration-test", backend.ChatSendParams{
-		Message:        "say hi",
+	if _, err := b.ChatSend(context.Background(), syntheticAgentID, backend.ChatSendParams{
+		Message:        "say hi briefly",
 		IdempotencyKey: "idem-1",
 	}); err != nil {
 		t.Fatalf("ChatSend: %v", err)
@@ -121,7 +115,7 @@ func TestIntegration_ChatSendStreams(t *testing.T) {
 	for {
 		select {
 		case ev := <-b.Events():
-			ce := decodeChat(t, ev)
+			ce := decodeChatEvent(t, ev)
 			switch ce.State {
 			case "delta":
 				sawDelta = true
@@ -129,7 +123,9 @@ func TestIntegration_ChatSendStreams(t *testing.T) {
 				if !sawDelta {
 					t.Error("final arrived before any delta")
 				}
-				assertHistoryPersisted(t, b, "integration-test")
+				if b.lastResponseID == "" {
+					t.Error("expected lastResponseID to be persisted")
+				}
 				return
 			case "error":
 				t.Fatalf("chat returned error: %s", ce.ErrorMessage)
@@ -140,35 +136,62 @@ func TestIntegration_ChatSendStreams(t *testing.T) {
 	}
 }
 
-// TestIntegration_ChatAbort starts a stream and aborts it. The backend
-// should emit an aborted event and stop streaming further deltas.
+func TestIntegration_ChatHistory_RoundTripsThroughServer(t *testing.T) {
+	b := connectTestBackend(t)
+
+	// First turn establishes a response id we can chain off.
+	if _, err := b.ChatSend(context.Background(), syntheticAgentID, backend.ChatSendParams{
+		Message:        "what is 2+2? answer in one word",
+		IdempotencyKey: "h1",
+	}); err != nil {
+		t.Fatalf("ChatSend: %v", err)
+	}
+	drainToFinal(t, b, 120*time.Second)
+
+	raw, err := b.ChatHistory(context.Background(), syntheticAgentID, 0)
+	if err != nil {
+		t.Fatalf("ChatHistory: %v", err)
+	}
+	var hist struct {
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &hist); err != nil {
+		t.Fatalf("decode history: %v\nraw: %s", err, raw)
+	}
+	if len(hist.Messages) < 2 {
+		t.Fatalf("expected ≥2 messages walked from server, got %d (raw: %s)", len(hist.Messages), raw)
+	}
+	if hist.Messages[0].Role != "user" {
+		t.Errorf("first walked role = %q want user", hist.Messages[0].Role)
+	}
+	if hist.Messages[1].Role != "assistant" {
+		t.Errorf("second walked role = %q want assistant", hist.Messages[1].Role)
+	}
+}
+
 func TestIntegration_ChatAbort(t *testing.T) {
 	b := connectTestBackend(t)
 
-	if err := b.CreateAgent(context.Background(), backend.CreateAgentParams{
-		Name:  "abort-test",
-		Model: os.Getenv("LUCINATE_HERMES_DEFAULT_MODEL"),
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	res, err := b.ChatSend(context.Background(), "abort-test", backend.ChatSendParams{
-		Message:        "count from 1 to 50, one per line",
-		IdempotencyKey: "idem-abort",
+	// Ask for something long so the abort window is wide enough.
+	res, err := b.ChatSend(context.Background(), syntheticAgentID, backend.ChatSendParams{
+		Message:        "count from 1 to 50, one number per line",
+		IdempotencyKey: "abort",
 	})
 	if err != nil {
 		t.Fatalf("ChatSend: %v", err)
 	}
-	runID := res.RunID
 
+	// Wait for the first delta then abort.
 	select {
 	case ev := <-b.Events():
-		_ = decodeChat(t, ev)
+		_ = decodeChatEvent(t, ev)
 	case <-time.After(60 * time.Second):
 		t.Fatal("timed out waiting for first delta before abort")
 	}
 
-	if err := b.ChatAbort(context.Background(), "abort-test", runID); err != nil {
+	if err := b.ChatAbort(context.Background(), syntheticAgentID, res.RunID); err != nil {
 		t.Fatalf("ChatAbort: %v", err)
 	}
 
@@ -176,7 +199,7 @@ func TestIntegration_ChatAbort(t *testing.T) {
 	for {
 		select {
 		case ev := <-b.Events():
-			ce := decodeChat(t, ev)
+			ce := decodeChatEvent(t, ev)
 			if ce.State == "aborted" {
 				return
 			}
@@ -186,8 +209,29 @@ func TestIntegration_ChatAbort(t *testing.T) {
 	}
 }
 
-// decodeChat unwraps a protocol.Event into its ChatEvent payload.
-func decodeChat(t *testing.T, ev protocol.Event) protocol.ChatEvent {
+// drainToFinal blocks until a chat-final event arrives or the timeout
+// fires. Used by tests that need to roll past a streaming turn before
+// asserting on follow-up state (history, lastResponseID).
+func drainToFinal(t *testing.T, b *Backend, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev := <-b.Events():
+			ce := decodeChatEvent(t, ev)
+			switch ce.State {
+			case "final":
+				return
+			case "error":
+				t.Fatalf("error event: %s", ce.ErrorMessage)
+			}
+		case <-deadline:
+			t.Fatal("timed out draining to final")
+		}
+	}
+}
+
+func decodeChatEvent(t *testing.T, ev protocol.Event) protocol.ChatEvent {
 	t.Helper()
 	if ev.EventName != protocol.EventChat {
 		t.Fatalf("unexpected event: %s", ev.EventName)
@@ -197,39 +241,4 @@ func decodeChat(t *testing.T, ev protocol.Event) protocol.ChatEvent {
 		t.Fatalf("decode chat event: %v", err)
 	}
 	return ce
-}
-
-// assertHistoryPersisted reads the agent transcript through the public
-// ChatHistory surface and confirms a user message and an assistant
-// reply made it to disk, in that order.
-func assertHistoryPersisted(t *testing.T, b *Backend, agentID string) {
-	t.Helper()
-	raw, err := b.ChatHistory(context.Background(), agentID, 0)
-	if err != nil {
-		t.Fatalf("ChatHistory: %v", err)
-	}
-	var hist struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(raw, &hist); err != nil {
-		t.Fatalf("decode history: %v\nraw: %s", err, string(raw))
-	}
-	if len(hist.Messages) < 2 {
-		t.Fatalf("expected at least 2 messages persisted, got %d (raw: %s)", len(hist.Messages), string(raw))
-	}
-	if hist.Messages[0].Role != "user" {
-		t.Errorf("first message role = %q want user", hist.Messages[0].Role)
-	}
-	if hist.Messages[1].Role != "assistant" {
-		t.Errorf("second message role = %q want assistant", hist.Messages[1].Role)
-	}
-	if len(hist.Messages[1].Content) == 0 || hist.Messages[1].Content[0].Text == "" {
-		t.Error("assistant message has empty content")
-	}
 }
