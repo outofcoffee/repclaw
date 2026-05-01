@@ -1349,3 +1349,181 @@ func TestFormatDuration_Hours(t *testing.T) {
 		t.Errorf("expected '1h1m', got %q", got)
 	}
 }
+
+// makeAgentToolEvent builds an "agent" event frame carrying a stream:"tool"
+// payload with the given phase and data fields.
+func makeAgentToolEvent(phase, name, toolCallID string, args, result json.RawMessage, isError bool) protocol.Event {
+	data := map[string]any{
+		"phase":      phase,
+		"name":       name,
+		"toolCallId": toolCallID,
+	}
+	if len(args) > 0 {
+		data["args"] = args
+	}
+	if len(result) > 0 {
+		data["result"] = result
+	}
+	if isError {
+		data["isError"] = true
+	}
+	agentEv := protocol.AgentEvent{
+		RunID:  "run1",
+		Stream: "tool",
+		Seq:    1,
+		Data:   data,
+	}
+	payload, _ := json.Marshal(agentEv)
+	return protocol.Event{EventName: protocol.EventAgent, Payload: payload}
+}
+
+func TestHandleAgentEvent_ToolStartFreezesStreamingAndAppendsCard(t *testing.T) {
+	m := newTestChatModel()
+	m.messages = []chatMessage{
+		{role: "user", content: "search please"},
+		{role: "assistant", content: "Sure, searching", streaming: true},
+	}
+
+	m.handleEvent(makeAgentToolEvent("start", "search", "tc-1",
+		json.RawMessage(`{"query":"hello"}`), nil, false))
+
+	if len(m.messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(m.messages))
+	}
+	if m.messages[1].streaming {
+		t.Error("expected streaming assistant to be frozen on tool start")
+	}
+	tool := m.messages[2]
+	if tool.role != "tool" {
+		t.Fatalf("expected role=tool, got %q", tool.role)
+	}
+	if tool.toolName != "search" {
+		t.Errorf("toolName = %q, want %q", tool.toolName, "search")
+	}
+	if tool.toolCallID != "tc-1" {
+		t.Errorf("toolCallID = %q, want %q", tool.toolCallID, "tc-1")
+	}
+	if tool.toolState != "running" {
+		t.Errorf("toolState = %q, want running", tool.toolState)
+	}
+	if !strings.Contains(tool.toolArgsLine, "query") || !strings.Contains(tool.toolArgsLine, "hello") {
+		t.Errorf("toolArgsLine = %q, want it to mention query=hello", tool.toolArgsLine)
+	}
+}
+
+func TestHandleAgentEvent_ToolStartDropsEmptyPlaceholder(t *testing.T) {
+	m := newTestChatModel()
+	m.messages = []chatMessage{
+		{role: "user", content: "hi"},
+		{role: "assistant", streaming: true, awaitingDelta: true},
+	}
+
+	m.handleEvent(makeAgentToolEvent("start", "search", "tc-1", nil, nil, false))
+
+	if len(m.messages) != 2 {
+		t.Fatalf("expected 2 messages (user + tool), got %d", len(m.messages))
+	}
+	if m.messages[1].role != "tool" {
+		t.Errorf("expected the empty placeholder to be replaced by a tool row, got %q", m.messages[1].role)
+	}
+}
+
+func TestHandleAgentEvent_ToolResultSuccessFlipsState(t *testing.T) {
+	m := newTestChatModel()
+	m.messages = []chatMessage{
+		{role: "tool", toolName: "search", toolCallID: "tc-1", toolState: "running"},
+	}
+
+	m.handleEvent(makeAgentToolEvent("result", "search", "tc-1", nil,
+		json.RawMessage(`{"content":[{"type":"text","text":"ok"}]}`), false))
+
+	if m.messages[0].toolState != "success" {
+		t.Errorf("toolState = %q, want success", m.messages[0].toolState)
+	}
+	if m.messages[0].toolError != "" {
+		t.Errorf("toolError = %q, want empty on success", m.messages[0].toolError)
+	}
+}
+
+func TestHandleAgentEvent_ToolResultErrorCarriesMessage(t *testing.T) {
+	m := newTestChatModel()
+	m.messages = []chatMessage{
+		{role: "tool", toolName: "read", toolCallID: "tc-2", toolState: "running"},
+	}
+
+	result := json.RawMessage(`{"content":[{"type":"text","text":"file not found: /nope"}]}`)
+	m.handleEvent(makeAgentToolEvent("result", "read", "tc-2", nil, result, true))
+
+	if m.messages[0].toolState != "error" {
+		t.Errorf("toolState = %q, want error", m.messages[0].toolState)
+	}
+	if !strings.Contains(m.messages[0].toolError, "file not found") {
+		t.Errorf("toolError = %q, want it to mention 'file not found'", m.messages[0].toolError)
+	}
+}
+
+func TestHandleAgentEvent_NonToolStreamIgnored(t *testing.T) {
+	m := newTestChatModel()
+	m.messages = []chatMessage{
+		{role: "assistant", content: "thinking", streaming: true},
+	}
+
+	agentEv := protocol.AgentEvent{
+		RunID:  "run1",
+		Stream: "lifecycle",
+		Data:   map[string]any{"phase": "start"},
+	}
+	payload, _ := json.Marshal(agentEv)
+	m.handleEvent(protocol.Event{EventName: protocol.EventAgent, Payload: payload})
+
+	if len(m.messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(m.messages))
+	}
+	if !m.messages[0].streaming {
+		t.Error("non-tool agent stream should not freeze the streaming assistant")
+	}
+}
+
+func TestSummariseArgs_PrefersCommonKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"command", `{"command":"ls -la","cwd":"/tmp"}`, `command="ls -la"`},
+		{"path", `{"path":"/etc/hosts"}`, `path="/etc/hosts"`},
+		{"query", `{"query":"hello"}`, `query="hello"`},
+		{"url", `{"url":"https://example.com"}`, `url="https://example.com"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := summariseArgs(json.RawMessage(tc.raw))
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSummariseArgs_FallsBackToCompactJSON(t *testing.T) {
+	got := summariseArgs(json.RawMessage(`{"foo":1,"bar":"baz"}`))
+	// Order of keys in map iteration is non-deterministic; just check both
+	// keys appear and the result is one line.
+	if !strings.Contains(got, "foo") || !strings.Contains(got, "bar") {
+		t.Errorf("got %q, want it to contain both keys", got)
+	}
+	if strings.Contains(got, "\n") {
+		t.Errorf("got multi-line summary %q", got)
+	}
+}
+
+func TestSummariseArgs_TruncatesLongValues(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	got := summariseArgs(json.RawMessage(`{"command":"` + long + `"}`))
+	if n := len([]rune(got)); n > 80 {
+		t.Errorf("summary not truncated: runes=%d, value=%q", n, got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("expected truncation ellipsis at end, got %q", got)
+	}
+}

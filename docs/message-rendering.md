@@ -7,6 +7,7 @@ Each chat message has a role that determines how it is displayed in the TUI:
 - `user` — sent by the local user; shown right-aligned.
 - `assistant` — returned by the agent; rendered as markdown via Glamour.
 - `system` — local-only notices (errors, status, command output); shown in a muted style and never sent to the gateway.
+- `tool` — inline status card for an in-flight or completed tool call from the agent. See [Tool call cards](#tool-call-cards).
 
 ## The System: prefix convention
 
@@ -36,6 +37,30 @@ When session history is fetched from the gateway, each user message may contain 
 Assistant messages are conditionally rendered with Glamour. `looksLikeMarkdown()` in `internal/tui/history.go` checks for code fences, bold markers, pipe tables, list prefixes, headings, and numbered lists. If none are found the text is shown as plain text, avoiding unwanted paragraph indentation on short replies.
 
 The Glamour renderer is created in `setSize()` with a wrap width equal to the terminal width minus 4. `wordWrap()` in `render.go` is applied after rendering and preserves lines containing box-drawing characters (table borders) so they are not split.
+
+## Tool call cards
+
+When the agent invokes a tool, lucinate renders a single-line status card inline in the chat scrollback so the user can see what's running. Cards are driven by `agent` events with `stream == "tool"` from the gateway — declared via the `tool-events` capability on connect (see `internal/client/client.go`).
+
+Each card shows a state glyph, the tool name in bold, and a one-line argument summary:
+
+```
+⠋ search (query="hello world")
+✓ search (query="hello world")
+✖ read (path="/missing") — file not found
+```
+
+The state glyph cycles through the same braille spinner as the streaming cursor (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) while the tool is running, then flips to `✓` on success or `✖` on error. Errors append a one-line message extracted from the tool result.
+
+The mapping from event payload to card lives in `handleAgentEvent` (`internal/tui/events.go`):
+
+- `phase: "start"` — freezes any currently streaming assistant row, then appends a new `chatMessage` with `role: "tool"` and `toolState: "running"`. If the streaming assistant is still the empty pre-delta placeholder, it's dropped instead of frozen so we don't render a blank assistant block above the card.
+- `phase: "update"` — currently a no-op. Partial result streaming is deferred (see issue for expand/collapse output).
+- `phase: "result"` — finds the matching tool row by `toolCallId` and flips `toolState` to `"success"` or `"error"`.
+
+The `summariseArgs` helper picks a human-readable key from the args object (priority order: `command`, `path`, `file`, `filePath`, `query`, `url`, `name`, `message`, `text`) or falls back to compact JSON, truncated to 80 runes.
+
+The full output of a tool call is not currently rendered; only the header line is. An expand/collapse affordance similar to the official OpenClaw TUI's Ctrl+O is tracked separately.
 
 ## Streaming placeholder
 

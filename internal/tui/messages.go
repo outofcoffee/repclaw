@@ -10,7 +10,7 @@ import (
 
 // chatMessage represents a single message in the conversation.
 type chatMessage struct {
-	role          string // "user", "assistant", "system", or "separator"
+	role          string // "user", "assistant", "system", "separator", or "tool"
 	content       string
 	raw           string // original markdown source when rendered is true; used to re-render on resize
 	thinking      string // reasoning/intermediate thought content from the model
@@ -19,6 +19,13 @@ type chatMessage struct {
 	errMsg        string
 	rendered      bool  // true if content has been glamour-rendered (contains ANSI codes)
 	timestampMs   int64 // unix millis; only used by "separator" rows to label resume time
+
+	// Tool fields populated only when role == "tool".
+	toolName     string
+	toolCallID   string
+	toolArgsLine string // single-line summary of the tool arguments
+	toolState    string // "running", "success", "error"
+	toolError    string // human-readable detail when toolState == "error"
 }
 
 // sessionStats holds token usage stats for display.

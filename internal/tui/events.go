@@ -21,6 +21,29 @@ type chatContentBlock struct {
 	Text string `json:"text"`
 }
 
+// toolEventData is the shape of the AgentEvent.Data map for stream=="tool"
+// events. The openclaw-go SDK ships ClientCapToolEvents but no typed payload
+// for the tool lifecycle, so this lives here until the SDK gains one.
+type toolEventData struct {
+	Phase      string          `json:"phase"` // "start", "update", "result"
+	Name       string          `json:"name"`
+	ToolCallID string          `json:"toolCallId"`
+	Args       json.RawMessage `json:"args,omitempty"`
+	Result     json.RawMessage `json:"result,omitempty"`
+	IsError    bool            `json:"isError,omitempty"`
+}
+
+// toolResultPayload mirrors the gateway's ToolResult shape just enough to
+// pull a one-line error message out of a failed tool result. Full output
+// rendering is intentionally deferred — see the "expand/collapse" follow-up
+// issue.
+type toolResultPayload struct {
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
 // extractThinkingFromMessage parses the Message field and extracts thinking blocks.
 // Only final events carry structured content blocks; delta events are plain strings.
 func extractThinkingFromMessage(raw json.RawMessage) string {
@@ -143,6 +166,9 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		}
 		m.updateViewport()
 		return m.drainQueueSkipRefresh()
+
+	case protocol.EventAgent:
+		return m.handleAgentEvent(ev)
 	}
 
 	if ev.EventName != protocol.EventChat {
@@ -279,4 +305,168 @@ func bellCmd() tea.Cmd {
 		_, _ = os.Stdout.Write([]byte("\a"))
 		return nil
 	}
+}
+
+// handleAgentEvent processes an "agent" event frame. Only the tool-stream
+// lifecycle is consumed for now (start/result phases) — other streams
+// (lifecycle, item, approval) are ignored and may be wired up later.
+func (m *chatModel) handleAgentEvent(ev protocol.Event) tea.Cmd {
+	var agentEv protocol.AgentEvent
+	if err := json.Unmarshal(ev.Payload, &agentEv); err != nil {
+		logEvent("AGENT parse error: %v", err)
+		return nil
+	}
+	if agentEv.Stream != "tool" {
+		return nil
+	}
+
+	// AgentEvent.Data is map[string]any; round-trip through JSON to get a
+	// typed view.
+	rawData, err := json.Marshal(agentEv.Data)
+	if err != nil {
+		logEvent("TOOL marshal data error: %v", err)
+		return nil
+	}
+	var td toolEventData
+	if err := json.Unmarshal(rawData, &td); err != nil {
+		logEvent("TOOL parse error: %v", err)
+		return nil
+	}
+	if td.ToolCallID == "" {
+		return nil
+	}
+	logEvent("TOOL phase=%s name=%s id=%s isErr=%v", td.Phase, td.Name, td.ToolCallID, td.IsError)
+
+	switch td.Phase {
+	case "start":
+		// Freeze any currently streaming assistant message so subsequent
+		// chat deltas land on a fresh row after the tool card. Drop the
+		// pre-delta placeholder if it never received any text — leaving an
+		// empty assistant block above the tool card looks broken.
+		if len(m.messages) > 0 {
+			last := &m.messages[len(m.messages)-1]
+			if last.role == "assistant" && last.streaming {
+				if last.awaitingDelta && last.content == "" {
+					m.messages = m.messages[:len(m.messages)-1]
+				} else {
+					last.streaming = false
+					last.awaitingDelta = false
+				}
+			}
+		}
+		name := td.Name
+		if name == "" {
+			name = "tool"
+		}
+		m.messages = append(m.messages, chatMessage{
+			role:         "tool",
+			toolName:     name,
+			toolCallID:   td.ToolCallID,
+			toolArgsLine: summariseArgs(td.Args),
+			toolState:    "running",
+		})
+		m.updateViewport()
+		return m.ensureSpinnerTicking()
+
+	case "update":
+		// Partial results are ignored in this pass; the running glyph keeps
+		// ticking and the final phase resolves the card. See the
+		// expand/collapse follow-up for full output rendering.
+		return nil
+
+	case "result":
+		for i := range m.messages {
+			if m.messages[i].role != "tool" {
+				continue
+			}
+			if m.messages[i].toolCallID != td.ToolCallID {
+				continue
+			}
+			if td.IsError {
+				m.messages[i].toolState = "error"
+				m.messages[i].toolError = extractToolErrorText(td.Result)
+			} else {
+				m.messages[i].toolState = "success"
+			}
+			break
+		}
+		m.updateViewport()
+		return nil
+	}
+	return nil
+}
+
+// summariseArgs produces a short single-line preview of a tool's arguments.
+// For common shapes ({command:"..."}, {path:"..."}, {query:"..."}, ...) it
+// pulls the most useful key. Otherwise it falls back to compact JSON,
+// truncated.
+func summariseArgs(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return truncateForArgs(strings.TrimSpace(string(raw)))
+	}
+	// Prefer human-readable keys in priority order.
+	for _, key := range []string{"command", "path", "file", "filePath", "query", "url", "name", "message", "text"} {
+		if v, ok := obj[key]; ok {
+			s := unmarshalString(v)
+			if s == "" {
+				continue
+			}
+			return truncateForArgs(fmt.Sprintf("%s=%q", key, s))
+		}
+	}
+	// Fall back to compact JSON.
+	compact, err := json.Marshal(obj)
+	if err != nil {
+		return truncateForArgs(strings.TrimSpace(string(raw)))
+	}
+	return truncateForArgs(string(compact))
+}
+
+// unmarshalString tries to interpret raw as a JSON string. Returns the
+// string value, or an empty string if raw is not a string.
+func unmarshalString(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return ""
+}
+
+// truncateForArgs limits the args summary to a single line, capped at
+// 80 runes with an ellipsis.
+func truncateForArgs(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	const max = 80
+	runes := []rune(s)
+	if len(runes) > max {
+		s = string(runes[:max-1]) + "…"
+	}
+	return s
+}
+
+// extractToolErrorText pulls a one-line error message out of a failed tool
+// result. The gateway nests error text under content[].text — fall back to
+// the raw JSON if the shape doesn't match.
+func extractToolErrorText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload toolResultPayload
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		var parts []string
+		for _, c := range payload.Content {
+			if c.Type == "text" && c.Text != "" {
+				parts = append(parts, c.Text)
+			}
+		}
+		if joined := strings.TrimSpace(strings.Join(parts, " ")); joined != "" {
+			return truncateForArgs(joined)
+		}
+	}
+	return truncateForArgs(strings.TrimSpace(string(raw)))
 }

@@ -125,10 +125,15 @@ func spinnerTickCmd() tea.Cmd {
 	})
 }
 
-// hasStreamingMessage reports whether any assistant message is still streaming.
+// hasStreamingMessage reports whether any assistant message is still streaming
+// or a tool is in the running state. The spinner tick keeps firing as long as
+// either is true so both the streaming cursor and the tool-card glyph animate.
 func (m *chatModel) hasStreamingMessage() bool {
 	for i := range m.messages {
 		if m.messages[i].streaming {
+			return true
+		}
+		if m.messages[i].role == "tool" && m.messages[i].toolState == "running" {
 			return true
 		}
 	}
