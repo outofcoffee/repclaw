@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.27.0] - 2026-05-01
+### Added
+- feat: delete agents from picker with type-to-confirm
+
+### Changed
+- build: replace deprecated goreleaser archive format fields
+- docs: improve OpenAI support description
+- test: cover factory dispatch, hermes prompt log, and client helpers
+
+### Fixed
+- fix(tui): preserve chat scroll during streaming and gate bell on focus
+
 ## [0.26.0] - 2026-04-30
 ### Added
 - feat(app): add SetDataDir programmatic seam for embedder data root (#85)
