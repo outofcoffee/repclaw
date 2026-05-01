@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/a3tai/openclaw-go/identity"
 
@@ -181,6 +182,66 @@ func TestResetIdentity_NoopWhenAbsent(t *testing.T) {
 	c, _ := newTestClient(t)
 	if err := c.ResetIdentity(); err != nil {
 		t.Errorf("ResetIdentity with no files should not error, got: %v", err)
+	}
+}
+
+// TestDone_PreClosedWhenNotConnected pins the contract Run's driver
+// relies on: before the first successful dial, Done() must return a
+// channel that is already closed so a select sitting on
+// <-client.Done() doesn't hang waiting for a connection that hasn't
+// been initiated yet.
+func TestDone_PreClosedWhenNotConnected(t *testing.T) {
+	c := NewWithIdentityStore(&config.Config{}, &fakeIdentityStore{})
+	ch := c.Done()
+	select {
+	case <-ch:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("Done() channel was not pre-closed when no gateway is attached")
+	}
+}
+
+// TestIsAuthFatal_Exported pins the exported predicate the startup
+// recovery path uses so the auth-modal classification stays in lockstep
+// with the supervisor's internal predicate.
+func TestIsAuthFatal_Exported(t *testing.T) {
+	if IsAuthFatal(nil) {
+		t.Error("IsAuthFatal(nil) should be false")
+	}
+	if !IsAuthFatal(errStr("connect: gateway token mismatch")) {
+		t.Error("IsAuthFatal should classify a token-mismatch error as fatal")
+	}
+	if IsAuthFatal(errStr("dial tcp: connection refused")) {
+		t.Error("IsAuthFatal should treat transient errors as non-fatal")
+	}
+}
+
+type errStr string
+
+func (e errStr) Error() string { return string(e) }
+
+// TestSetConnectTimeout_ClampsNonPositiveToZero pins the small but
+// load-bearing rule: a non-positive duration disables the override and
+// lets the SDK fall back to its own default. Without this clamp, a
+// preferences file set to "0 seconds" would forward a zero deadline
+// through gateway.WithConnectTimeout and trip the SDK's "must be > 0"
+// guard on the next dial.
+func TestSetConnectTimeout_ClampsNonPositiveToZero(t *testing.T) {
+	c := NewWithIdentityStore(&config.Config{}, &fakeIdentityStore{})
+
+	c.SetConnectTimeout(5 * time.Second)
+	if got := c.connectTimeout; got != 5*time.Second {
+		t.Errorf("after positive set: got %v want 5s", got)
+	}
+
+	c.SetConnectTimeout(0)
+	if got := c.connectTimeout; got != 0 {
+		t.Errorf("after zero set: got %v want 0", got)
+	}
+
+	c.SetConnectTimeout(3 * time.Second)
+	c.SetConnectTimeout(-time.Second)
+	if got := c.connectTimeout; got != 0 {
+		t.Errorf("after negative set: got %v want 0", got)
 	}
 }
 
