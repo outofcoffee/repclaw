@@ -195,6 +195,7 @@ func (c *Client) buildOptions() ([]gateway.Option, error) {
 		}),
 		gateway.WithRole(protocol.RoleOperator),
 		gateway.WithScopes(protocol.ScopeOperatorRead, protocol.ScopeOperatorWrite, protocol.ScopeOperatorAdmin, protocol.ScopeOperatorApprovals),
+		gateway.WithCaps(protocol.ClientCapToolEvents),
 		gateway.WithOnEvent(func(ev protocol.Event) {
 			select {
 			case c.events <- ev:

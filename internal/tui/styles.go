@@ -106,4 +106,14 @@ var (
 	// folds the same info into its own header bar.
 	connBannerStyle = lipgloss.NewStyle().
 			Foreground(subtle)
+
+	// Tool-card styles. Running reuses the muted status colour; success
+	// borrows the local-exec green so the visual language matches "this
+	// finished cleanly"; error falls through to errorStyle.
+	toolRunningStyle = lipgloss.NewStyle().
+				Foreground(subtle)
+	toolSuccessStyle = lipgloss.NewStyle().
+				Foreground(localExcClr)
+	toolNameStyle = lipgloss.NewStyle().
+			Bold(true)
 )

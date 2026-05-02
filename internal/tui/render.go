@@ -65,6 +65,9 @@ func (m *chatModel) updateViewport() {
 			} else {
 				b.WriteString(statusStyle.Render(wordWrap(msg.content, contentWidth)))
 			}
+
+		case "tool":
+			b.WriteString(m.renderToolCard(msg, contentWidth))
 		}
 	}
 
@@ -352,4 +355,44 @@ func buildSeparator(width int, label string) string {
 // word-wrapped as it would destroy their alignment.
 func isTableLine(line string) bool {
 	return strings.ContainsRune(line, '│') || strings.ContainsRune(line, '─')
+}
+
+// renderToolCard renders a single inline tool-status line. Running cards
+// animate via the shared spinner frame; success and error states use static
+// glyphs.
+func (m *chatModel) renderToolCard(msg chatMessage, contentWidth int) string {
+	var glyph string
+	var lineStyle lipgloss.Style
+	switch msg.toolState {
+	case "success":
+		glyph = "✓"
+		lineStyle = toolSuccessStyle
+	case "error":
+		glyph = "✖"
+		lineStyle = errorStyle
+	default:
+		glyph = spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+		lineStyle = toolRunningStyle
+	}
+
+	name := msg.toolName
+	if name == "" {
+		name = "tool"
+	}
+
+	var head strings.Builder
+	head.WriteString(glyph)
+	head.WriteString(" ")
+	head.WriteString(toolNameStyle.Render(name))
+	if msg.toolArgsLine != "" {
+		head.WriteString(" ")
+		head.WriteString("(")
+		head.WriteString(msg.toolArgsLine)
+		head.WriteString(")")
+	}
+	if msg.toolState == "error" && msg.toolError != "" {
+		head.WriteString(" — ")
+		head.WriteString(msg.toolError)
+	}
+	return lineStyle.Render(wordWrap(head.String(), contentWidth))
 }

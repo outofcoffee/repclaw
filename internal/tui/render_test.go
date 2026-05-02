@@ -497,6 +497,75 @@ func TestLastTimestampMs(t *testing.T) {
 	}
 }
 
+func TestRenderToolCard_Running(t *testing.T) {
+	vp := viewport.New()
+	vp.SetWidth(80)
+	vp.SetHeight(10)
+	m := &chatModel{
+		viewport:  vp,
+		width:     80,
+		agentName: "main",
+		messages: []chatMessage{
+			{role: "tool", toolName: "search", toolCallID: "tc1", toolArgsLine: `query="hello"`, toolState: "running"},
+		},
+	}
+	m.updateViewport()
+	view := ansi.Strip(m.viewport.View())
+	if !strings.Contains(view, "search") {
+		t.Errorf("rendered view missing tool name: %q", view)
+	}
+	if !strings.Contains(view, `query="hello"`) {
+		t.Errorf("rendered view missing args summary: %q", view)
+	}
+	if !strings.Contains(view, spinnerFrames[0]) {
+		t.Errorf("running tool card should render the spinner frame, got: %q", view)
+	}
+}
+
+func TestRenderToolCard_Success(t *testing.T) {
+	vp := viewport.New()
+	vp.SetWidth(80)
+	vp.SetHeight(10)
+	m := &chatModel{
+		viewport:  vp,
+		width:     80,
+		agentName: "main",
+		messages: []chatMessage{
+			{role: "tool", toolName: "search", toolCallID: "tc1", toolState: "success"},
+		},
+	}
+	m.updateViewport()
+	view := ansi.Strip(m.viewport.View())
+	if !strings.Contains(view, "✓") {
+		t.Errorf("success tool card should render ✓, got: %q", view)
+	}
+	if !strings.Contains(view, "search") {
+		t.Errorf("rendered view missing tool name: %q", view)
+	}
+}
+
+func TestRenderToolCard_Error(t *testing.T) {
+	vp := viewport.New()
+	vp.SetWidth(80)
+	vp.SetHeight(10)
+	m := &chatModel{
+		viewport:  vp,
+		width:     80,
+		agentName: "main",
+		messages: []chatMessage{
+			{role: "tool", toolName: "read", toolCallID: "tc1", toolState: "error", toolError: "file not found"},
+		},
+	}
+	m.updateViewport()
+	view := ansi.Strip(m.viewport.View())
+	if !strings.Contains(view, "✖") {
+		t.Errorf("error tool card should render ✖, got: %q", view)
+	}
+	if !strings.Contains(view, "file not found") {
+		t.Errorf("error tool card should include error detail, got: %q", view)
+	}
+}
+
 func TestNarrowLayout_Threshold(t *testing.T) {
 	tests := []struct {
 		name       string
