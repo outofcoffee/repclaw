@@ -24,11 +24,13 @@ No file browsers, no task boards, no dashboards. Just chat.
 - **Streaming responses, conversation history, and multi-agent support**
 - **Create and delete agents** directly from the TUI — gateway-managed for OpenClaw, or local `IDENTITY.md` + `SOUL.md` markdown for OpenAI-compatible backends. Delete is type-the-name to confirm, with an optional "keep files" toggle so you can drop the listing without nuking the content. Hermes profiles are configured server-side via `hermes profile create`
 - **Markdown rendering** for assistant messages
+- **Tool call cards** — when the agent invokes a tool, an inline card shows what's running, what arguments it got, and whether it succeeded or failed (OpenClaw)
 - **Shell commands** — run locally with `!` or remotely on the gateway with `!!`
 - **Message queueing** so you can keep typing while the agent is responding
 - **Local agent skills** loaded from `~/.agents/skills/` as slash commands
 - **Live token/cost stats** in the header bar (OpenClaw)
 - **Thinking level control** via `/think` — tune reasoning depth per session (OpenClaw)
+- **Cron browser** — list, edit, run, and create scheduled jobs without leaving the terminal (OpenClaw)
 
 ## Install
 
@@ -117,8 +119,9 @@ Use `/config` to open the preferences view. Settings are persisted to `~/.lucina
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Completion notification | On | Ring the terminal bell when a response completes |
+| Completion notification | On | Ring the terminal bell when a response completes (only if the terminal isn't focused) |
 | History limit | 50 | Number of messages loaded when restoring a session (range 10–500) |
+| Connect timeout | 15s | Per-attempt deadline for the initial connect and each reconnect (range 5–300s — bump it for slow local LLMs) |
 
 In the config view, use `Space` to toggle checkboxes and `←`/`→` to adjust numeric values.
 
@@ -130,6 +133,7 @@ Type these in the chat input. Tab autocompletes partial commands.
 |---------|--------|
 | `/help` | Show available commands |
 | `/agents` | Return to agent picker |
+| `/cancel` | Cancel the in-progress response (also: `Esc`) |
 | `/clear` | Clear chat display |
 | `/compact` | Compact session context (with confirmation) — OpenClaw only |
 | `/config` | Open preferences |

@@ -7,6 +7,7 @@ Each chat message has a role that determines how it is displayed in the TUI:
 - `user` — sent by the local user; shown right-aligned.
 - `assistant` — returned by the agent; rendered as markdown via Glamour.
 - `system` — local-only notices (errors, status, command output); shown in a muted style and never sent to the gateway.
+- `separator` — a dim divider row inserted between restored history and a new turn; labelled with the relative time of the most recent restored message (e.g. `Resumed from 2h ago`). The `timestampMs` field on `chatMessage` carries the unix-ms used by `formatSeparatorLabel`.
 - `tool` — inline status card for an in-flight or completed tool call from the agent. See [Tool call cards](#tool-call-cards).
 
 ## The System: prefix convention

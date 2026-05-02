@@ -63,7 +63,13 @@ When the agent invokes a tool, an inline status card appears in the scrollback b
 
 The number of messages loaded from the gateway on session init is configurable. The default is 50. It can be changed via `/config` ("History limit") in steps of 10 (range 10–500). The value is stored in `prefs.HistoryLimit` and passed to `loadHistory()` as the fetch limit.
 
+When restored history is non-empty, a dimmed separator row is rendered above the new turn, labelled with the relative time of the most recent restored message (`Resumed from 2h ago`, `…`). The label comes from `formatSeparatorLabel` (`render.go`), driven by the `timestampMs` field on the synthetic separator `chatMessage`. See [message-rendering.md](message-rendering.md#message-roles) for the role.
+
 See [sessions.md](sessions.md#lifecycle) for how history loading fits into the session lifecycle.
+
+## Connect timeout
+
+Each (re)connect attempt has a per-attempt deadline applied to the WebSocket / HTTP handshake. The default is 15 seconds; the range is 5–300 seconds via `/config` ("Connect timeout"). The configured value is loaded by `app.DefaultBackendFactory` (`app/factory.go`) for every backend dispatch, so the same setting governs the initial connect and the supervisor's reconnect attempts. Bump it when targeting a slow local LLM that cold-starts on first request.
 
 ## Scrolling
 
