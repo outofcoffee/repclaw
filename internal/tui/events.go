@@ -92,8 +92,35 @@ func extractTextFromMessage(raw json.RawMessage) string {
 	return string(raw)
 }
 
+// extractEventSessionKey pulls a top-level "sessionKey" string out of any
+// event payload. Returns "" when the payload has no sessionKey, is empty,
+// or fails to parse — those cases must be allowed through (older gateways,
+// non-session-scoped events). This lets a single check at the top of
+// handleEvent cover every event type that carries a sessionKey, instead of
+// repeating ad-hoc filters in each handler — and protects new event types
+// added later without code changes here.
+func extractEventSessionKey(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var probe struct {
+		SessionKey string `json:"sessionKey"`
+	}
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return ""
+	}
+	return probe.SessionKey
+}
+
 func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 	logEvent("RAW_EVENT name=%s payload_len=%d", ev.EventName, len(ev.Payload))
+
+	// Drop events scoped to a different session before any handler runs.
+	// Events without a sessionKey (or with an empty one) fall through.
+	if key := extractEventSessionKey(ev.Payload); key != "" && key != m.sessionKey {
+		logEvent("  IGNORED (session %q != ours %q)", key, m.sessionKey)
+		return nil
+	}
 
 	// Handle exec events.
 	switch ev.EventName {
@@ -104,11 +131,6 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			return nil
 		}
 		logEvent("EXEC_FINISHED session=%s cmd=%s exit=%v output_len=%d", finished.SessionKey, finished.Command, finished.ExitCode, len(finished.Output))
-		// Ignore exec results from other sessions.
-		if finished.SessionKey != "" && finished.SessionKey != m.sessionKey {
-			logEvent("  EXEC_FINISHED ignored (different session)")
-			return nil
-		}
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
 			if last.role == "system" && last.content == "running on gateway..." {
@@ -153,10 +175,6 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			return nil
 		}
 		logEvent("EXEC_DENIED session=%s reason=%s", denied.SessionKey, denied.Reason)
-		if denied.SessionKey != "" && denied.SessionKey != m.sessionKey {
-			logEvent("  EXEC_DENIED ignored (different session)")
-			return nil
-		}
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
 			if last.role == "system" && last.content == "running on gateway..." {
@@ -182,12 +200,6 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 	}
 
 	logEvent("EVENT state=%s runID=%s seq=%d msgLen=%d sessionKey=%s", chatEv.State, chatEv.RunID, chatEv.Seq, len(chatEv.Message), chatEv.SessionKey)
-
-	// Ignore chat events from other sessions.
-	if chatEv.SessionKey != "" && chatEv.SessionKey != m.sessionKey {
-		logEvent("  CHAT ignored (different session)")
-		return nil
-	}
 
 	switch chatEv.State {
 	case "delta":

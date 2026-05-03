@@ -1462,6 +1462,124 @@ func TestHandleAgentEvent_ToolResultErrorCarriesMessage(t *testing.T) {
 	}
 }
 
+// makeAgentToolEventForSession builds an EventAgent payload carrying a tool
+// event with an explicit top-level sessionKey. The Go SDK's protocol.AgentEvent
+// struct doesn't declare SessionKey, so we hand-build the JSON to match the
+// gateway's actual wire shape (see infra/agent-events.ts AgentEventPayload).
+func makeAgentToolEventForSession(sessionKey, phase, name, toolCallID string) protocol.Event {
+	data := map[string]any{
+		"phase":      phase,
+		"name":       name,
+		"toolCallId": toolCallID,
+	}
+	envelope := map[string]any{
+		"runId":  "run1",
+		"seq":    1,
+		"stream": "tool",
+		"data":   data,
+	}
+	if sessionKey != "" {
+		envelope["sessionKey"] = sessionKey
+	}
+	payload, _ := json.Marshal(envelope)
+	return protocol.Event{EventName: protocol.EventAgent, Payload: payload}
+}
+
+// --- Session-key filtering for tool/agent events ---
+
+// TestHandleAgentEvent_ToolStart_DifferentSession_Ignored verifies that a
+// tool-start event from another session does not append a tool card or freeze
+// the current streaming assistant message.
+func TestHandleAgentEvent_ToolStart_DifferentSession_Ignored(t *testing.T) {
+	m := newTestChatModel()
+	m.sessionKey = "sess-A"
+	m.messages = []chatMessage{
+		{role: "user", content: "hello"},
+		{role: "assistant", content: "thinking", streaming: true},
+	}
+
+	m.handleEvent(makeAgentToolEventForSession("sess-B", "start", "search", "tc-1"))
+
+	if len(m.messages) != 2 {
+		t.Fatalf("expected 2 messages (foreign tool dropped), got %d", len(m.messages))
+	}
+	if !m.messages[1].streaming {
+		t.Error("own streaming assistant should not be frozen by a foreign tool start")
+	}
+}
+
+// TestHandleAgentEvent_ToolResult_DifferentSession_Ignored verifies that a
+// tool-result event from another session does not flip the state of an
+// existing tool card belonging to the current session (e.g. when toolCallId
+// values collide across sessions).
+func TestHandleAgentEvent_ToolResult_DifferentSession_Ignored(t *testing.T) {
+	m := newTestChatModel()
+	m.sessionKey = "sess-A"
+	m.messages = []chatMessage{
+		{role: "tool", toolName: "search", toolCallID: "tc-1", toolState: "running"},
+	}
+
+	m.handleEvent(makeAgentToolEventForSession("sess-B", "result", "search", "tc-1"))
+
+	if m.messages[0].toolState != "running" {
+		t.Errorf("own tool card was modified by foreign session: state=%q", m.messages[0].toolState)
+	}
+}
+
+// TestHandleAgentEvent_ToolStart_MatchingSession_Processed verifies the
+// centralized filter doesn't accidentally drop tool events with a matching
+// sessionKey.
+func TestHandleAgentEvent_ToolStart_MatchingSession_Processed(t *testing.T) {
+	m := newTestChatModel()
+	m.sessionKey = "sess-A"
+
+	m.handleEvent(makeAgentToolEventForSession("sess-A", "start", "search", "tc-1"))
+
+	if len(m.messages) != 1 || m.messages[0].role != "tool" {
+		t.Fatalf("expected tool card to be appended, got %+v", m.messages)
+	}
+}
+
+// TestHandleAgentEvent_ToolStart_EmptySessionKey_Processed verifies that
+// agent events without a sessionKey (older gateway versions, or events
+// emitted while isControlUiVisible is false) are still processed.
+func TestHandleAgentEvent_ToolStart_EmptySessionKey_Processed(t *testing.T) {
+	m := newTestChatModel()
+	m.sessionKey = "sess-A"
+
+	m.handleEvent(makeAgentToolEventForSession("", "start", "search", "tc-1"))
+
+	if len(m.messages) != 1 || m.messages[0].role != "tool" {
+		t.Fatalf("expected tool card to be appended for empty sessionKey, got %+v", m.messages)
+	}
+}
+
+// --- Centralized session-key filter coverage ---
+
+// TestExtractEventSessionKey_Variants verifies the helper that backs the
+// centralized filter handles every shape we expect on the wire.
+func TestExtractEventSessionKey_Variants(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"empty payload", ``, ""},
+		{"no sessionKey field", `{"foo":"bar"}`, ""},
+		{"explicit empty sessionKey", `{"sessionKey":""}`, ""},
+		{"populated sessionKey", `{"sessionKey":"sess-A","other":1}`, "sess-A"},
+		{"malformed JSON", `not json`, ""},
+		{"sessionKey at nested level only", `{"data":{"sessionKey":"sess-A"}}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractEventSessionKey([]byte(tc.payload)); got != tc.want {
+				t.Errorf("extractEventSessionKey(%q) = %q, want %q", tc.payload, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHandleAgentEvent_NonToolStreamIgnored(t *testing.T) {
 	m := newTestChatModel()
 	m.messages = []chatMessage{
