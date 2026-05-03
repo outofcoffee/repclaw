@@ -80,16 +80,25 @@ type GatewayEventMsg protocol.Event
 // goBackMsg signals the AppModel to return to agent selection.
 type goBackMsg struct{}
 
-// modelListMsg is returned when the model list is fetched.
-type modelListMsg struct {
-	models []protocol.ModelChoice
-	err    error
-}
-
 // modelSwitchedMsg is returned after switching models.
 type modelSwitchedMsg struct {
 	modelID string
 	err     error
+}
+
+// showModelPickerMsg signals the AppModel to switch to the model picker.
+type showModelPickerMsg struct {
+	sessionKey     string
+	currentModelID string
+}
+
+// goBackFromModelPickerMsg signals the AppModel to return to the chat view.
+type goBackFromModelPickerMsg struct{}
+
+// modelsLoadedMsg is returned when the model list is fetched for the picker.
+type modelsLoadedMsg struct {
+	models []protocol.ModelChoice
+	err    error
 }
 
 // execSubmittedMsg signals the exec request was submitted (output comes via events).

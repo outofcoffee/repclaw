@@ -22,6 +22,7 @@ const (
 	viewSessions
 	viewConfig
 	viewCrons
+	viewModelPicker
 )
 
 // BackendFactory builds an unconnected backend.Backend for a stored
@@ -95,6 +96,7 @@ type AppModel struct {
 	sessionsModel    sessionsModel
 	configModel      configModel
 	cronsModel       cronsModel
+	modelPicker      modelPickerModel
 	backend          backend.Backend
 	activeConn       *config.Connection // the connection backend belongs to; rendered in status bars
 	store            *config.Connections
@@ -233,6 +235,8 @@ func (m AppModel) Actions() []Action {
 		return m.configModel.Actions()
 	case viewCrons:
 		return m.cronsModel.Actions()
+	case viewModelPicker:
+		return m.modelPicker.Actions()
 	}
 	return nil
 }
@@ -266,6 +270,10 @@ func (m AppModel) TriggerAction(id string) (AppModel, tea.Cmd) {
 	case viewCrons:
 		var cmd tea.Cmd
 		m.cronsModel, cmd = m.cronsModel.TriggerAction(id)
+		return m, cmd
+	case viewModelPicker:
+		var cmd tea.Cmd
+		m.modelPicker, cmd = m.modelPicker.TriggerAction(id)
 		return m, cmd
 	}
 	return m, nil
@@ -415,6 +423,8 @@ func (m AppModel) update(msg tea.Msg) (AppModel, tea.Cmd) {
 			m.configModel.setSize(msg.Width, msg.Height)
 		case viewCrons:
 			m.cronsModel.setSize(msg.Width, msg.Height)
+		case viewModelPicker:
+			m.modelPicker.setSize(msg.Width, msg.Height)
 		}
 		return m, nil
 
@@ -549,6 +559,16 @@ func (m AppModel) update(msg tea.Msg) (AppModel, tea.Cmd) {
 		m.state = viewSessions
 		return m, m.sessionsModel.Init()
 
+	case showModelPickerMsg:
+		m.modelPicker = newModelPickerModel(m.backend, msg.sessionKey, msg.currentModelID, m.hideActionHints, m.activeConn, m.disableExitKeys)
+		m.modelPicker.setSize(m.width, m.height)
+		m.state = viewModelPicker
+		return m, m.modelPicker.Init()
+
+	case goBackFromModelPickerMsg:
+		m.state = viewChat
+		return m, nil
+
 	case sessionSelectedMsg:
 		agentID := msg.agentID
 		if agentID == "" {
@@ -677,6 +697,11 @@ func (m AppModel) update(msg tea.Msg) (AppModel, tea.Cmd) {
 	case viewCrons:
 		var cmd tea.Cmd
 		m.cronsModel, cmd = m.cronsModel.Update(msg)
+		return m, cmd
+
+	case viewModelPicker:
+		var cmd tea.Cmd
+		m.modelPicker, cmd = m.modelPicker.Update(msg)
 		return m, cmd
 	}
 
@@ -850,6 +875,8 @@ func (m AppModel) View() tea.View {
 		v = tea.NewView(m.configModel.View())
 	case viewCrons:
 		v = tea.NewView(m.cronsModel.View())
+	case viewModelPicker:
+		v = tea.NewView(m.modelPicker.View())
 	default:
 		v = tea.NewView("")
 	}
