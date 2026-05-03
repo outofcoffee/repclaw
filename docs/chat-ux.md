@@ -41,9 +41,14 @@ The spinner also appears while the model is thinking before any response deltas 
 The header line shows:
 
 - **Left:** agent name · model ID (last path component) · thinking level (if set and not `off`) · connection status (only when not connected) · update-available badge (only when `prefs.UpdateChecksEnabled()` and the startup check found a newer release)
-- **Right:** token summary (input / output / cache) · total cost
+- **Right:** context usage (`tokens: 65k/1.0m (7%)  $0.42`) when the gateway has reported a context window for the active session; otherwise the legacy `tokens: 125.5K (2.3K cached)  $0.42` shape.
 
-Stats are loaded on init and refreshed after each message exchange via `loadStats()`. The header is re-rendered on every `statsLoadedMsg`. Token and cost values come from `client.SessionUsage()`.
+Two independent loads feed the right-hand side:
+
+- `loadContextUsage()` populates `m.promptTokens` and `m.contextWindow`. It calls `SessionsList(agentID)`, finds the entry whose `key` matches `m.sessionKey`, and reads `totalTokens` (numerator — a per-turn prompt-token snapshot of `input + cacheRead + cacheWrite`, intentionally excluding output) and `contextTokens` (denominator), falling back to `defaults.contextTokens` when the entry omits the window. This is what makes the percentage scoped to the *current session*; the older approach of calling `SessionUsage("")` returned gateway-wide aggregates and pegged the value at 999%. The cmd refreshes on chat init, on every `historyRefreshMsg` (so the percentage tracks turn-by-turn), and on `modelSwitchedMsg` (a new model can change the window). The handler discards results whose `sessionKey` no longer matches `m.sessionKey` so a navigated-away-and-back race can't apply a stale snapshot.
+- `loadStats()` continues to call `client.SessionUsage()` for the cumulative cost figure shown on the right of the header (and for the `/stats` table). The percentage display falls back to its token+cache layout when `loadContextUsage` hasn't produced a window yet.
+
+The renderer caps the percentage at 999% so a runaway numerator never widens the header past three digits.
 
 The connection-status badge is rendered in the error colour and only appears when the gateway connection is degraded:
 
