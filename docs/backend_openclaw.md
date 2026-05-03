@@ -23,10 +23,11 @@ See [connections.md](connections.md) for the cross-backend connection lifecycle 
 
 `Connect`, `Close`, `Events`, and `Supervise` are pass-throughs to the underlying client. The TUI's connecting view routes auth failures into modal sub-states:
 
+- `NOT_PAIRED` → pairing-required modal: instructions to approve the device on the gateway host, then Enter to retry.
 - `gateway token mismatch` → device-token modal: clear / reset identity / cancel. `ClearToken` and `ResetIdentity` come from the `DeviceTokenAuth` sub-interface.
 - `gateway token missing` → device-token text prompt; submission stores via `StoreToken`.
 
-Tokens and the Ed25519 device identity live under `~/.lucinate/identity/<endpoint>/`, isolated per gateway endpoint — see [authentication.md](authentication.md) for the full pairing flow.
+Tokens and the Ed25519 device identity live under `~/.lucinate/identity/<endpoint>/`, isolated per gateway endpoint. The first successful connect after a fresh approval re-dials transparently so the surviving connection authenticates with the issued token — see [authentication.md](authentication.md) for the full pairing flow and the re-dial rationale.
 
 ## Agent and session model
 

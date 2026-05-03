@@ -20,48 +20,59 @@ On first run, `identity.Store.LoadOrGenerate()` creates an Ed25519 keypair under
 
 ## First-run pairing flow
 
-1. Run `lucinate` — the client connects to the gateway with the device identity but no token. The gateway registers a pending pairing request.
-2. On the gateway host, an administrator approves the device:
+1. Run `lucinate` — the client connects to the gateway with the device identity but no token. The gateway responds `NOT_PAIRED` and registers a pending pairing request.
+2. The connecting view enters its `subStatePairingRequired` modal (`internal/tui/connecting.go`) with on-screen instructions. On the gateway host, an administrator approves the device:
    ```
    openclaw device list --pending
    openclaw device approve <device-id>
    ```
-3. Restart `lucinate`. The client reconnects; the gateway issues a device token, which is saved to the endpoint's identity directory via `client.store.SaveDeviceToken()`.
+3. The user presses Enter in the modal. `authResolvedMsg{}` triggers `retryConnect` (`internal/tui/app.go`), which re-invokes `Connect` on the same backend. The gateway accepts the connection and issues a fresh device token in `hello.Auth.DeviceToken`, which `client.dial` persists via `store.SaveDeviceToken`.
+4. `dial` then closes the bootstrap connection and re-dials with the freshly-issued token (see [Re-dial after first-time pairing](#re-dial-after-first-time-pairing)). The TUI advances to the agent picker — no process restart required.
 
-The save is non-fatal — if it fails, a warning is logged but the session continues. On subsequent runs the saved token is loaded and presented on connect.
+The token save is non-fatal — if it fails, a warning is logged but the session continues. On subsequent runs the saved token is loaded and presented on connect.
 
 **Note:** Bootstrap tokens were removed in v0.10.2. Device pairing is the only setup path.
 
+## Re-dial after first-time pairing
+
+The bootstrap connect for a freshly approved device authenticates by Ed25519 device-key signature alone — the token field on `connect` is empty because the client doesn't have one yet. The gateway issues the first device token in `hello-ok`. Reusing that bootstrap connection for scoped RPCs leaves `sessions.create` silently stalled; the OpenClaw protocol expects scoped operations to run on a connection that authenticated *with* the token at connect time.
+
+`internal/client/client.go` handles this inline: when `dial` observes that it presented an empty token AND the gateway returned a non-empty `hello.Auth.DeviceToken`, it persists the token, closes the bootstrap `gateway.Client`, and dials a second time so the surviving connection carries the issued token. Subsequent launches (token already on disk → bootstrap presents it → gateway returns no new one) skip the second dial. Tests pin both branches in `internal/client/dial_test.go`.
+
+The TUI also wraps `CreateSession` (`internal/tui/app.go`) in a per-call `context.WithTimeout` derived as `2 ×` the configured connect timeout, so any future stall in this region surfaces as a UI error in the agent picker rather than freezing the view.
+
 ## Subsequent runs
 
-1. Load `OPENCLAW_GATEWAY_URL` from environment.
+1. Load `OPENCLAW_GATEWAY_URL` from environment, or use a saved connection from `~/.lucinate/connections.json`.
 2. Load the Ed25519 identity and stored device token from `~/.lucinate/identity/<endpoint>/`.
 3. Open a WebSocket connection to the gateway with the identity and token. The gateway SDK (`github.com/a3tai/openclaw-go`) attaches the token to all API calls.
-4. On a successful `Hello` handshake, any refreshed token is saved back to disk.
+4. On a successful `Hello` handshake, any refreshed token is saved back to disk; no second dial is needed because the connection already authenticated with a token.
 5. Proceed to the agent picker.
 
-If the token is expired or revoked the gateway rejects the connection and an error is shown in the agent picker. The user can press `r` to retry after the device has been re-approved.
+If the token is expired or revoked the gateway rejects the connection and the connecting view opens the appropriate auth-recovery modal (see below).
 
 ## Interactive auth recovery on connect
 
-When the initial connect fails with an auth error, `connectWithAuth` in `main.go` handles it interactively before exiting:
+When `Connect` fails with a recognised auth error, `runConnect` in `internal/tui/app.go` classifies it via the `isNotPairedErr` / `isTokenMismatchErr` / `isTokenMissingErr` / `isAPIKeyErr` predicates and `handleConnectResult` opens the matching modal sub-state in `internal/tui/connecting.go`:
 
-- **Token mismatch** (`gateway token mismatch`) — the stored device token is no longer valid for this gateway (for example, the device was removed and re-added). The user is offered three choices:
-  1. Clear the stored token and retry pairing (default).
-  2. Reset the device identity entirely (new keypair) and retry pairing.
-  3. Quit.
-- **Token missing** (`gateway token missing`) — the gateway requires a pre-shared auth token that the client doesn't have. This can occur on a first-time connect, or as a follow-up after a clear/reset retry. The user is prompted to paste the gateway auth token, which is saved via `client.StoreToken()` and the connect is retried.
+- **Not paired** (`NOT_PAIRED`) — pairing-required modal: instructions to run `openclaw device approve` on the gateway host, then Enter to retry. See [First-run pairing flow](#first-run-pairing-flow).
+- **Token mismatch** (`gateway token mismatch`) — the stored device token is no longer valid for this gateway (for example, the device was removed and re-added). The modal offers three choices, each routed through the `DeviceTokenAuth` sub-interface on the live backend:
+  1. Clear the stored token and retry pairing (`ClearToken`, default).
+  2. Reset the device identity entirely (new keypair) and retry pairing (`ResetIdentity`).
+  3. Cancel back to the connections picker.
+- **Token missing** (`gateway token missing`) — text prompt for a pre-shared token; submission stores via `DeviceTokenAuth.StoreToken` and the connect is retried.
+- **API key required** (HTTP 401/403 from any `/v1` request on OpenAI-compat or Hermes connections) — text prompt for an API key; submission stores via `APIKeyAuth.StoreAPIKey`.
 
-Both flows read from `os.Stdin`, so they only trigger in an interactive terminal. Non-interactive callers will see the original error and exit.
+All four flows happen inside the running TUI — modal text inputs, not stdin. Cancellation routes back to the connections picker; the active backend is closed before the next pick.
 
 ## Reconnect after disconnection
 
 Once the TUI is running, a supervisor in `internal/client/supervisor.go` watches the gateway connection (`Client.Done()`) and reconnects automatically if it drops — for example, when the gateway is restarted.
 
-- **Backoff schedule:** 1s, 2s, 4s, 8s, 15s, then 30s for every subsequent attempt. Each attempt has a 15s connect timeout (matching `connectTimeout` for the initial connect).
-- **State surface:** the supervisor pushes `tui.ConnStateMsg` into the bubbletea program. The chat header shows `⚠ disconnected`, `⟳ reconnecting (attempt N)`, or `✖ auth failed — restart`. A one-line system message is added to the chat scrollback on disconnect and on recovery.
+- **Backoff schedule:** 1s, 2s, 4s, 8s, 15s, then 30s for every subsequent attempt. Each attempt's connect timeout comes from `prefs.ConnectTimeoutSeconds` (default 15s), the same knob that floors the initial connect.
+- **State surface:** the supervisor pushes `tui.ConnStateMsg` into the bubbletea program. The chat header shows `⚠ disconnected`, `⟳ reconnecting (attempt N)`, or `✖ auth failed`. A one-line system message is added to the chat scrollback on disconnect and on recovery.
 - **In-flight streams:** if a reply was streaming when the connection dropped, the placeholder is cleared so the input is usable again. The gateway has no resume protocol for an interrupted run; the partial reply is abandoned.
-- **Auth failures:** if the gateway rejects the device token after restart (`gateway token mismatch` / `token missing`), the supervisor stops retrying. The chat banner instructs the user to quit (Ctrl+C) and restart so the interactive `connectWithAuth` flow can prompt for a fix — that flow needs `os.Stdin`, which bubbletea owns once the TUI is up.
+- **Auth failures:** if the gateway rejects the device token mid-session (`gateway token mismatch` / `token missing`), the supervisor stops retrying. The chat banner advises switching connections via `/connections` so the connecting view's auth-recovery modal can run on the chosen connection. The supervisor cannot drive the modal itself — that flow lives on the connect path, not the reconnect path.
 
 ## Scopes
 
