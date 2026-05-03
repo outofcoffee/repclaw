@@ -21,7 +21,11 @@ type pendingConfirmation struct {
 }
 
 // slashCommands is the list of available slash commands for autocomplete.
-var slashCommands = []string{"/agents", "/cancel", "/clear", "/commands", "/compact", "/config", "/connections", "/crons", "/exit", "/help", "/model", "/quit", "/reset", "/sessions", "/skills", "/stats", "/status", "/think"}
+// "/agents" is intentionally listed before "/agent" so tab-completing "/age"
+// resolves to the picker (the more common command) rather than the switcher.
+// "/model" likewise sits before "/models" — typing "s" to extend a completion
+// is cheaper than backspacing one.
+var slashCommands = []string{"/agents", "/agent", "/cancel", "/clear", "/commands", "/compact", "/config", "/connections", "/crons", "/exit", "/help", "/model", "/models", "/quit", "/reset", "/sessions", "/skills", "/stats", "/status", "/think"}
 
 // thinkingLevels is the ordered list of valid thinking levels.
 var thinkingLevels = []string{"off", "minimal", "low", "medium", "high"}
@@ -76,6 +80,62 @@ func (m *chatModel) completeSlashCommand(prefix string) string {
 	return ""
 }
 
+// findAgentArgAt detects whether the cursor sits at the end of the argument
+// of `/agent <name>` on the current line. Returns the byte offset where the
+// argument starts and what the user has typed so far. Empty prefix is valid
+// (cursor immediately after `/agent ` triggers a completion to the first
+// known agent).
+func findAgentArgAt(value string, byteOffset int) (start int, prefix string, ok bool) {
+	if byteOffset < 0 || byteOffset > len(value) {
+		return 0, "", false
+	}
+	// Cursor must be at end-of-line or end-of-value. Agent names may
+	// contain spaces, so the whole tail of the line is the arg token.
+	if byteOffset < len(value) && value[byteOffset] != '\n' {
+		return 0, "", false
+	}
+	lineStart := byteOffset
+	for lineStart > 0 && value[lineStart-1] != '\n' {
+		lineStart--
+	}
+	const cmd = "/agent "
+	if byteOffset-lineStart < len(cmd) {
+		return 0, "", false
+	}
+	if !strings.EqualFold(value[lineStart:lineStart+len(cmd)], cmd) {
+		return 0, "", false
+	}
+	argStart := lineStart + len(cmd)
+	return argStart, value[argStart:byteOffset], true
+}
+
+// completeAgentName returns the first known agent name whose lowercased
+// form starts with prefix, preserving the original casing.
+func (m *chatModel) completeAgentName(prefix string) string {
+	lower := strings.ToLower(prefix)
+	for _, n := range m.agentNames {
+		if strings.HasPrefix(strings.ToLower(n), lower) {
+			return n
+		}
+	}
+	return ""
+}
+
+// agentNameHint returns the completion hint for the argument of
+// `/agent <name>` at the given cursor offset. Empty token/suffix when no
+// hint applies (wrong context, agents not yet loaded, or no match).
+func (m *chatModel) agentNameHint(value string, cursorByte int) (token, suffix string) {
+	_, prefix, ok := findAgentArgAt(value, cursorByte)
+	if !ok {
+		return "", ""
+	}
+	match := m.completeAgentName(prefix)
+	if match == "" || strings.EqualFold(match, prefix) {
+		return "", ""
+	}
+	return prefix, match[len(prefix):]
+}
+
 // slashCommandHint returns the completion hint for the slash token at the
 // given cursor byte offset. token is what the user has typed so far
 // (including the leading '/'), suffix is the remainder that Tab would insert.
@@ -102,6 +162,15 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 		return true, tea.Quit
 	case "/agents":
 		return true, func() tea.Msg { return goBackMsg{} }
+	case "/models":
+		sessionKey := m.sessionKey
+		currentModelID := m.modelID
+		return true, func() tea.Msg {
+			return showModelPickerMsg{
+				sessionKey:     sessionKey,
+				currentModelID: currentModelID,
+			}
+		}
 	case "/cancel":
 		return true, m.cancelTurn()
 	case "/clear":
@@ -196,7 +265,7 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 			}
 		}
 	case "/help", "/commands":
-		helpText := "/quit, /exit — quit lucinate\n/agents — return to agent picker\n/cancel — cancel the current response (also: Esc)\n/clear — clear chat display\n/compact — compact session context\n/config — open preferences\n/connections — switch gateway connection\n/crons — list and manage cron jobs (use /crons all for global)\n/model — open model picker (filter as you type)\n/model <name> — switch model directly\n/reset — delete session and start fresh\n/sessions — browse and restore previous sessions\n/stats — show session statistics\n/status — show gateway health and agent status\n/skills — list available agent skills\n/think — show current thinking level\n/think <level> — set thinking level (off/minimal/low/medium/high)\n/help — show this help\n\n!<command> — run command locally\n!!<command> — run command on gateway host"
+		helpText := "/quit, /exit — quit lucinate\n/agents — return to agent picker\n/agent <name> — switch agent directly\n/cancel — cancel the current response (also: Esc)\n/clear — clear chat display\n/compact — compact session context\n/config — open preferences\n/connections — switch gateway connection\n/crons — list and manage cron jobs (use /crons all for global)\n/models — open model picker (filter as you type)\n/model <name> — switch model directly\n/reset — delete session and start fresh\n/sessions — browse and restore previous sessions\n/stats — show session statistics\n/status — show gateway health and agent status\n/skills — list available agent skills\n/think — show current thinking level\n/think <level> — set thinking level (off/minimal/low/medium/high)\n/help — show this help\n\n!<command> — run command locally\n!!<command> — run command on gateway host"
 		if len(m.skills) > 0 {
 			helpText += fmt.Sprintf("\n\n%d agent skill(s) available — type /skills to list", len(m.skills))
 		}
@@ -248,6 +317,11 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 		return true, nil
 	}
 
+	// /agent with optional name argument.
+	if command == "/agent" || strings.HasPrefix(command, "/agent ") {
+		return m.handleAgentCommand(text)
+	}
+
 	// /model with optional argument.
 	if command == "/model" || strings.HasPrefix(command, "/model ") {
 		return m.handleModelCommand(text)
@@ -285,18 +359,68 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 	return false, nil
 }
 
-// handleModelCommand handles `/model` and `/model <name>`.
-func (m *chatModel) handleModelCommand(text string) (bool, tea.Cmd) {
+// handleAgentCommand handles `/agent` and `/agent <name>`. With no argument
+// it returns to the agent picker (same as `/agents`). With a name it resolves
+// the agent and creates a session, mirroring the picker selection path.
+func (m *chatModel) handleAgentCommand(text string) (bool, tea.Cmd) {
 	parts := strings.SplitN(strings.TrimSpace(text), " ", 2)
-	if len(parts) == 1 {
-		sessionKey := m.sessionKey
-		currentModelID := m.modelID
-		return true, func() tea.Msg {
-			return showModelPickerMsg{
-				sessionKey:     sessionKey,
-				currentModelID: currentModelID,
+	if len(parts) == 1 || strings.TrimSpace(parts[1]) == "" {
+		return true, func() tea.Msg { return goBackMsg{} }
+	}
+
+	query := strings.ToLower(strings.TrimSpace(parts[1]))
+	b := m.backend
+	return true, func() tea.Msg {
+		ctx := context.Background()
+		result, err := b.ListAgents(ctx)
+		if err != nil {
+			return agentSwitchFailedMsg{err: err}
+		}
+		var match *protocol.AgentSummary
+		for i, a := range result.Agents {
+			lowerName := strings.ToLower(a.Name)
+			lowerID := strings.ToLower(a.ID)
+			if lowerName == query || lowerID == query {
+				match = &result.Agents[i]
+				break
+			}
+			if match == nil && (strings.Contains(lowerName, query) || strings.Contains(lowerID, query)) {
+				match = &result.Agents[i]
 			}
 		}
+		if match == nil {
+			return agentSwitchFailedMsg{err: fmt.Errorf("no agent matching %q", query)}
+		}
+		name := match.Name
+		if name == "" {
+			name = match.ID
+		}
+		modelID := ""
+		if match.Model != nil {
+			modelID = match.Model.Primary
+		}
+		key, err := b.CreateSession(ctx, match.ID, "main")
+		return sessionCreatedMsg{
+			sessionKey: key,
+			agentID:    match.ID,
+			agentName:  name,
+			modelID:    modelID,
+			err:        err,
+		}
+	}
+}
+
+// handleModelCommand handles `/model <name>`. Bare `/model` is an error —
+// `/models` opens the picker.
+func (m *chatModel) handleModelCommand(text string) (bool, tea.Cmd) {
+	parts := strings.SplitN(strings.TrimSpace(text), " ", 2)
+	if len(parts) == 1 || strings.TrimSpace(parts[1]) == "" {
+		m.messages = append(m.messages, chatMessage{
+			role:   "system",
+			errMsg: "/model requires a name — use /models to open the picker",
+		})
+		m.updateViewport()
+		return true, nil
 	}
 
 	query := strings.ToLower(strings.TrimSpace(parts[1]))

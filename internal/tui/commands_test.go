@@ -60,6 +60,38 @@ func TestSlashCommand_Agents(t *testing.T) {
 	}
 }
 
+func TestSlashCommand_Agent_BareReturnsToAgentPicker(t *testing.T) {
+	m := newSlashTestModel()
+	handled, cmd := m.handleSlashCommand("/agent")
+	if !handled {
+		t.Fatal("expected /agent to be handled")
+	}
+	if cmd == nil {
+		t.Fatal("expected /agent to return a goBackMsg cmd")
+	}
+	if _, ok := cmd().(goBackMsg); !ok {
+		t.Errorf("expected goBackMsg, got %T", cmd())
+	}
+}
+
+func TestSlashCommand_Agent_NoMatchReturnsFailureMsg(t *testing.T) {
+	m := newSlashTestModel()
+	handled, cmd := m.handleSlashCommand("/agent nope")
+	if !handled {
+		t.Fatal("expected /agent <name> to be handled")
+	}
+	if cmd == nil {
+		t.Fatal("expected /agent <name> to return a switch cmd")
+	}
+	msg, ok := cmd().(agentSwitchFailedMsg)
+	if !ok {
+		t.Fatalf("expected agentSwitchFailedMsg, got %T", cmd())
+	}
+	if msg.err == nil || !strings.Contains(msg.err.Error(), "no agent matching") {
+		t.Errorf("expected no-match error, got %v", msg.err)
+	}
+}
+
 func TestSlashCommand_Clear(t *testing.T) {
 	m := newSlashTestModel()
 	handled, cmd := m.handleSlashCommand("/clear")
@@ -192,14 +224,32 @@ func TestSlashCommand_Skills_Populated(t *testing.T) {
 	}
 }
 
-func TestSlashCommand_Model_ListReturnsCmd(t *testing.T) {
+func TestSlashCommand_Model_BareEmitsHint(t *testing.T) {
 	m := newSlashTestModel()
 	handled, cmd := m.handleSlashCommand("/model")
 	if !handled {
 		t.Fatal("expected /model to be handled")
 	}
+	if cmd != nil {
+		t.Error("expected bare /model to return no cmd (inline error only)")
+	}
+	last := m.messages[len(m.messages)-1]
+	if last.role != "system" || !strings.Contains(last.errMsg, "/models") {
+		t.Errorf("expected hint pointing at /models, got: %+v", last)
+	}
+}
+
+func TestSlashCommand_Models_ReturnsPickerCmd(t *testing.T) {
+	m := newSlashTestModel()
+	handled, cmd := m.handleSlashCommand("/models")
+	if !handled {
+		t.Fatal("expected /models to be handled")
+	}
 	if cmd == nil {
-		t.Error("expected /model to return a list cmd")
+		t.Fatal("expected /models to return a picker cmd")
+	}
+	if _, ok := cmd().(showModelPickerMsg); !ok {
+		t.Errorf("expected showModelPickerMsg, got %T", cmd())
 	}
 }
 
@@ -349,6 +399,45 @@ func TestSlashCommandHint(t *testing.T) {
 					tt.input, tt.cursorByte, gotToken, gotSuffix, tt.wantToken, tt.wantSuffix)
 			}
 		})
+	}
+}
+
+func TestAgentNameHint(t *testing.T) {
+	m := newSlashTestModel()
+	m.agentNames = []string{"alpha", "Beta", "Gamma Two"}
+	tests := []struct {
+		name       string
+		input      string
+		cursorByte int
+		wantToken  string
+		wantSuffix string
+	}{
+		{"empty arg completes first", "/agent ", 7, "", "alpha"},
+		{"prefix matches", "/agent al", 9, "al", "pha"},
+		{"case-insensitive prefix", "/agent BE", 9, "BE", "ta"},
+		{"matches name with space", "/agent Gam", 10, "Gam", "ma Two"},
+		{"exact match no hint", "/agent alpha", 12, "", ""},
+		{"no match", "/agent zzz", 10, "", ""},
+		{"command without space", "/agent", 6, "", ""},
+		{"unrelated command", "/agents", 7, "", ""},
+		{"cursor mid-line", "/agent al ", 9, "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotToken, gotSuffix := m.agentNameHint(tt.input, tt.cursorByte)
+			if gotToken != tt.wantToken || gotSuffix != tt.wantSuffix {
+				t.Errorf("agentNameHint(%q, %d) = (%q, %q), want (%q, %q)",
+					tt.input, tt.cursorByte, gotToken, gotSuffix, tt.wantToken, tt.wantSuffix)
+			}
+		})
+	}
+}
+
+func TestAgentNameHint_NoAgentsLoaded(t *testing.T) {
+	m := newSlashTestModel()
+	token, suffix := m.agentNameHint("/agent al", 9)
+	if token != "" || suffix != "" {
+		t.Errorf("expected no hint when agents are unloaded, got (%q, %q)", token, suffix)
 	}
 }
 

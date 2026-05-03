@@ -16,6 +16,8 @@ If exactly one agent is returned, it is selected automatically without user inte
 
 Pressing Enter on a highlighted agent calls `client.CreateSession(agentID, key)`. On success, `sessionCreatedMsg` carries the new session key and the app transitions to the chat view (`newChatModel(...)`). See [sessions.md](sessions.md) for the session lifecycle from this point.
 
+The `/agent <name>` slash command bypasses the picker entirely and reaches the same `sessionCreatedMsg` path — see [commands.md](commands.md#agent). From the chat input, `/agent ` followed by Tab autocompletes against the cached agent list.
+
 ## Creating an agent
 
 Pressing `n` in the picker switches to a creation form (`subStateCreate`). The form's shape is driven by the active backend's `Capabilities.AgentWorkspace` flag (see `backend.Capabilities`).
