@@ -177,6 +177,21 @@ func TestRender_ChatView_HeaderShowsContextPercent(t *testing.T) {
 	waitForContains(t, tm.Output(), "65k/1.0m", "(6%)")
 }
 
+// TestRender_ChatView_HeaderCapsPercentAt999 locks in the safety cap:
+// if the snapshot reports a numerator that vastly exceeds the window
+// (e.g. a corrupt/aggregate value), the header must clamp at 999% so
+// it never widens past three digits and breaks alignment.
+func TestRender_ChatView_HeaderCapsPercentAt999(t *testing.T) {
+	adapter := newRenderingChatModel(t, "scout")
+	adapter.inner.promptTokens = 100_000_000
+	adapter.inner.contextWindow = 1_000
+
+	tm := teatest.NewTestModel(t, adapter, teatest.WithInitialTermSize(120, 40))
+	defer finishProgram(t, tm)
+
+	waitForContains(t, tm.Output(), "(999%)")
+}
+
 // TestRender_ChatView_HeaderFallsBackWithoutContextWindow locks in the
 // fallback when the gateway hasn't advertised a window for the active
 // model — the legacy "tokens: X (Y cached)" form is preserved so the
