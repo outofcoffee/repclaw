@@ -229,6 +229,23 @@ func newChatModel(b backend.Backend, sessionKey, agentID, agentName, modelID str
 	ta.SetHeight(inputHeight)
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
+
+	// Bubbles' default cursor renders its on-frame as
+	// `Style.Reverse(true).Render(char)`. With the library default of
+	// `Color("7")` (ANSI 8-colour light grey, no background), the
+	// reverse-swap on SwiftTerm's iOS default-colour pair lands at the
+	// visibility threshold — over a dim placeholder character the
+	// leading rune comes out effectively black-on-black, so the "T" of
+	// "Type a message..." disappears under the cursor. Pinning to
+	// ANSI 15 (bright white) guarantees a visible block on any
+	// reasonable palette: the swap puts white in the cell's bg and the
+	// terminal's default-bg colour in the fg. SetStyles propagates
+	// through the textarea's `updateVirtualCursorStyle` so the
+	// `virtualCursor.Style` picks up the new Foreground.
+	taStyles := ta.Styles()
+	taStyles.Cursor.Color = lipgloss.Color("15")
+	ta.SetStyles(taStyles)
+
 	ta.KeyMap.InsertNewline.SetKeys("alt+enter")
 	ta.KeyMap.DeleteWordBackward.SetKeys("alt+backspace", "ctrl+w")
 	ta.KeyMap.DeleteWordForward.SetKeys("alt+delete", "alt+d")
