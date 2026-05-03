@@ -755,7 +755,11 @@ func (m selectModel) viewConfirmDelete() string {
 	}
 	b.WriteString("\n")
 
-	b.WriteString("  Files mode: " + toggleView(m.keepFilesLabel(), "Delete files", "Keep files"))
+	currentFilesMode := "Delete files"
+	if m.keepFiles {
+		currentFilesMode = "Keep files"
+	}
+	b.WriteString("  Files mode: " + toggleView(currentFilesMode, "Delete files", "Keep files"))
 	b.WriteString(helpStyle.Render("   (tab to toggle)"))
 	b.WriteString("\n")
 	b.WriteString("    " + helpStyle.Render(m.filesModeDescription()))
