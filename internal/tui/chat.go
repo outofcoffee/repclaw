@@ -163,6 +163,8 @@ type chatModel struct {
 	renderer        *glamour.TermRenderer
 	stats           *sessionStats
 	modelID         string
+	promptTokens    int // input + cache read + cache write for the latest turn (a per-session snapshot, not cumulative); 0 until first sessions.list refresh
+	contextWindow   int // model context capacity for the active session; 0 when unknown
 	skills          []agentSkill
 	agentNames      []string // populated asynchronously by loadAgentNames; powers /agent <TAB> completion
 	spinnerFrame    int
@@ -261,6 +263,7 @@ func (m chatModel) Init() tea.Cmd {
 		textarea.Blink,
 		m.loadHistory(),
 		m.loadStats(),
+		m.loadContextUsage(),
 		func() tea.Msg { return skillsDiscoveredMsg{skills: discoverSkills()} },
 		m.loadAgentNames(),
 	)
@@ -284,6 +287,65 @@ func (m chatModel) loadAgentNames() tea.Cmd {
 			}
 		}
 		return chatAgentNamesLoadedMsg{names: names}
+	}
+}
+
+// loadContextUsage fetches the per-session context-usage snapshot
+// (numerator and denominator for the header's "N/W (P%)" display)
+// from sessions.list. The gateway emits a totalTokens field per
+// session entry that is the prompt-token snapshot for the latest run
+// (input + cache read + cache write, intentionally excluding output),
+// and a contextTokens field that is the model window for that specific
+// session. Reading both from the same entry keeps the percentage scoped
+// to *this* session rather than a gateway-wide aggregate.
+func (m chatModel) loadContextUsage() tea.Cmd {
+	if m.sessionKey == "" {
+		return func() tea.Msg { return contextUsageLoadedMsg{} }
+	}
+	b := m.backend
+	sessionKey := m.sessionKey
+	agentID := m.agentID
+	return func() tea.Msg {
+		raw, err := b.SessionsList(context.Background(), agentID)
+		if err != nil {
+			return contextUsageLoadedMsg{sessionKey: sessionKey}
+		}
+		var resp struct {
+			Sessions []json.RawMessage `json:"sessions"`
+			Defaults struct {
+				ContextTokens *int `json:"contextTokens"`
+			} `json:"defaults"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return contextUsageLoadedMsg{sessionKey: sessionKey}
+		}
+		var entry struct {
+			Key           string `json:"key"`
+			TotalTokens   *int   `json:"totalTokens"`
+			ContextTokens *int   `json:"contextTokens"`
+		}
+		for _, rawEntry := range resp.Sessions {
+			var probe struct {
+				Key string `json:"key"`
+			}
+			if err := json.Unmarshal(rawEntry, &probe); err != nil || probe.Key != sessionKey {
+				continue
+			}
+			if err := json.Unmarshal(rawEntry, &entry); err == nil {
+				break
+			}
+		}
+		out := contextUsageLoadedMsg{sessionKey: sessionKey}
+		if entry.TotalTokens != nil {
+			out.promptTokens = *entry.TotalTokens
+		}
+		switch {
+		case entry.ContextTokens != nil:
+			out.contextWindow = *entry.ContextTokens
+		case resp.Defaults.ContextTokens != nil:
+			out.contextWindow = *resp.Defaults.ContextTokens
+		}
+		return out
 	}
 }
 
@@ -369,6 +431,18 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			})
 		}
 		m.updateViewport()
+		// New model means a new context window — refresh the snapshot
+		// so the header doesn't keep showing the previous model's window.
+		return m, m.loadContextUsage()
+
+	case contextUsageLoadedMsg:
+		// Discard if the active session changed mid-flight (e.g. user
+		// navigated away then back) — the snapshot would belong to a
+		// different session.
+		if msg.sessionKey == m.sessionKey {
+			m.promptTokens = msg.promptTokens
+			m.contextWindow = msg.contextWindow
+		}
 		return m, nil
 
 	case gatewayStatusMsg:
@@ -446,7 +520,10 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			m.messages = msg.messages
 			m.updateViewport()
 		}
-		return m, nil
+		// History refresh fires after each completed turn — pull a
+		// fresh prompt-token snapshot so the % keeps up with the
+		// session's current context size.
+		return m, tea.Batch(m.loadStats(), m.loadContextUsage())
 
 	case tea.KeyPressMsg:
 		logEvent("KEY code=%d mod=%v string=%q", msg.Code, msg.Mod, msg.String())
@@ -861,7 +938,21 @@ func (m chatModel) View() string {
 		left += " · " + headerBadgeWarnStyle.Render("↑ "+m.updateLatest)
 	}
 	right := ""
-	if m.stats != nil {
+	if m.contextWindow > 0 && m.promptTokens > 0 {
+		// Per-session prompt-token snapshot from sessions.list — the
+		// "live context" size for the latest turn. Capped at 999% so
+		// a runaway value never widens the header.
+		pct := m.promptTokens * 100 / m.contextWindow
+		if pct > 999 {
+			pct = 999
+		}
+		cost := 0.0
+		if m.stats != nil {
+			cost = m.stats.totalCost
+		}
+		right = fmt.Sprintf("tokens: %s/%s (%d%%)  $%.2f ",
+			formatTokensShort(m.promptTokens), formatTokensShort(m.contextWindow), pct, cost)
+	} else if m.stats != nil {
 		newTokens := m.stats.inputTokens + m.stats.outputTokens
 		right = fmt.Sprintf("tokens: %s (%s cached)  $%.2f ",
 			formatTokens(newTokens), formatTokens(m.stats.cacheRead), m.stats.totalCost)

@@ -86,6 +86,17 @@ type modelSwitchedMsg struct {
 	err     error
 }
 
+// contextUsageLoadedMsg carries a per-session context-usage snapshot
+// (numerator + denominator for the header's "N/W (P%)" display),
+// sourced from the entry in sessions.list that matches the active
+// session key. Both fields are 0 when the entry can't be found or
+// the gateway didn't advertise the values.
+type contextUsageLoadedMsg struct {
+	sessionKey    string
+	promptTokens  int // input + cache read + cache write for the latest turn (no output)
+	contextWindow int
+}
+
 // showModelPickerMsg signals the AppModel to switch to the model picker.
 type showModelPickerMsg struct {
 	sessionKey     string
