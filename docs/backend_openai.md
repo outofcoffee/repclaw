@@ -16,7 +16,7 @@ See [connections.md](connections.md) for the cross-backend connection lifecycle 
 
 `Connect(ctx)` issues `GET /v1/models`. A 401 or 403 is surfaced as the canonical `api key required` error so the connecting view routes it to the API-key modal. Any other ≥400 response surfaces as `connect: HTTP <code>: <body>`.
 
-The API key is sent as `Authorization: Bearer <key>` when present and omitted otherwise (some endpoints — Ollama, vLLM without auth — accept anonymous requests). The auth modal calls `StoreAPIKey`, which updates the in-memory key on the live backend and (via the `secretAwareBackend` shim in `main.go`) writes through to `~/.lucinate/secrets/secrets.json` so the next launch reuses it without re-prompting.
+The API key is sent as `Authorization: Bearer <key>` when present and omitted otherwise (some endpoints — Ollama, vLLM without auth — accept anonymous requests). The auth modal calls `StoreAPIKey`, which updates the in-memory key on the live backend and (via the `secretAwareOpenAIBackend` shim in `app/factory.go`) writes through to `~/.lucinate/secrets/secrets.json` so the next launch reuses it without re-prompting.
 
 ## Agent storage
 

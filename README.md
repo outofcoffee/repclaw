@@ -88,9 +88,9 @@ Switch between saved connections at any time with `/connections` from the chat v
 lucinate
 ```
 
-#### Optional (OpenClaw only)
+#### First-time pairing (OpenClaw only)
 
-On first run, lucinate generates an Ed25519 device identity under `~/.lucinate/identity/<endpoint>/` (keyed by gateway host) and sends a pairing request to the gateway. On the gateway host, run:
+On first run, lucinate generates an Ed25519 device identity under `~/.lucinate/identity/<endpoint>/` (keyed by gateway host) and sends a pairing request to the gateway. The TUI shows a "pairing required" prompt with the next steps. On the gateway host, run:
 
 ```sh
 openclaw device list --pending
@@ -102,7 +102,7 @@ You should see lucinate's device ID. Approve it:
 openclaw device approve <device-id>
 ```
 
-Then restart lucinate — subsequent connections use the stored device token automatically.
+Press Enter in the lucinate prompt to retry — the connection completes in place, the gateway issues a device token, and you land in the agent picker. No restart needed.
 
 ### 3. Pick an agent
 

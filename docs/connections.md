@@ -60,7 +60,7 @@ The submission flow dispatches on `connectingModel.authNeed` rather than on Go i
 
 API keys live at `~/.lucinate/secrets/secrets.json` (mode 0600), keyed by connection ID. `config.GetAPIKey(connID)` and `config.SetAPIKey(connID, key)` are the public surface. `LUCINATE_OPENAI_API_KEY` falls back when no per-connection key is stored.
 
-The `secretAwareBackend` shim in `main.go` wraps `*openai.Backend` so `StoreAPIKey` writes through to disk during the auth-modal resolution path; the next launch reuses the key without re-prompting.
+The `secretAwareOpenAIBackend` and `secretAwareHermesBackend` shims in `app/factory.go` wrap their respective concrete backends so `StoreAPIKey` writes through to `~/.lucinate/secrets/secrets.json` during the auth-modal resolution path; the next launch reuses the key without re-prompting.
 
 A future enhancement is to back this with the OS keychain (Keychain on macOS, libsecret on Linux, Credential Manager on Windows) and fall back to the JSON file when no keychain is available — kept on disk for now to avoid platform-specific dependencies on first run.
 
