@@ -47,6 +47,12 @@ type fakeBackend struct {
 	// paths without inventing a separate fake.
 	createSessionHook func(ctx context.Context, agentID, key string) (string, error)
 
+	// sessionsListHook, when non-nil, replaces the default empty
+	// SessionsList response so tests of the chat header's
+	// context-usage path can stage a realistic gateway payload (or
+	// an error).
+	sessionsListHook func(ctx context.Context, agentID string) (json.RawMessage, error)
+
 	// Cron RPC seams — tests pre-seed jobs / runs / errors and read
 	// back the recorded calls through these fields.
 	cronJobs        []protocol.CronJob
@@ -97,6 +103,9 @@ func (f *fakeBackend) DeleteAgent(ctx context.Context, params backend.DeleteAgen
 	return f.deleteAgentErr
 }
 func (f *fakeBackend) SessionsList(ctx context.Context, agentID string) (json.RawMessage, error) {
+	if f.sessionsListHook != nil {
+		return f.sessionsListHook(ctx, agentID)
+	}
 	return json.RawMessage(`{"sessions":[]}`), nil
 }
 func (f *fakeBackend) CreateSession(ctx context.Context, agentID, key string) (string, error) {

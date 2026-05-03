@@ -162,6 +162,54 @@ func TestChatModel_HeaderOmitsConnectionWhenBlank(t *testing.T) {
 	}
 }
 
+// TestRender_ChatView_HeaderShowsContextPercent locks in the
+// context-usage display: when sessions.list has reported a
+// per-session prompt-token snapshot and a context window for the
+// active session, the header renders "tokens N/W (P%)".
+func TestRender_ChatView_HeaderShowsContextPercent(t *testing.T) {
+	adapter := newRenderingChatModel(t, "scout")
+	adapter.inner.promptTokens = 65_000
+	adapter.inner.contextWindow = 1_000_000
+
+	tm := teatest.NewTestModel(t, adapter, teatest.WithInitialTermSize(120, 40))
+	defer finishProgram(t, tm)
+
+	waitForContains(t, tm.Output(), "65k/1.0m", "(6%)")
+}
+
+// TestRender_ChatView_HeaderCapsPercentAt999 locks in the safety cap:
+// if the snapshot reports a numerator that vastly exceeds the window
+// (e.g. a corrupt/aggregate value), the header must clamp at 999% so
+// it never widens past three digits and breaks alignment.
+func TestRender_ChatView_HeaderCapsPercentAt999(t *testing.T) {
+	adapter := newRenderingChatModel(t, "scout")
+	adapter.inner.promptTokens = 100_000_000
+	adapter.inner.contextWindow = 1_000
+
+	tm := teatest.NewTestModel(t, adapter, teatest.WithInitialTermSize(120, 40))
+	defer finishProgram(t, tm)
+
+	waitForContains(t, tm.Output(), "(999%)")
+}
+
+// TestRender_ChatView_HeaderFallsBackWithoutContextWindow locks in the
+// fallback when the gateway hasn't advertised a window for the active
+// model — the legacy "tokens: X (Y cached)" form is preserved so the
+// header never shows a misleading 0% or "/0".
+func TestRender_ChatView_HeaderFallsBackWithoutContextWindow(t *testing.T) {
+	adapter := newRenderingChatModel(t, "scout")
+	adapter.inner.stats = &sessionStats{
+		inputTokens:  1_500,
+		outputTokens: 500,
+		cacheRead:    300,
+	}
+
+	tm := teatest.NewTestModel(t, adapter, teatest.WithInitialTermSize(120, 40))
+	defer finishProgram(t, tm)
+
+	waitForContains(t, tm.Output(), "tokens:", "cached")
+}
+
 func TestRender_ChatView_QueuedCountShownInHelpBar(t *testing.T) {
 	adapter := newRenderingChatModel(t, "main")
 	adapter.inner.sending = true

@@ -206,6 +206,21 @@ func formatTokens(n int) string {
 	}
 }
 
+// formatTokensShort formats a token count using lowercase k/m suffixes
+// in the "65k/1.0m" style used by the context-usage header. Thousands
+// round to whole units (no decimal) so the figure stays compact in the
+// status bar.
+func formatTokensShort(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fm", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%dk", n/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
 // wordWrap wraps text to the given width, preserving existing newlines.
 // Lines that contain box-drawing characters (table output) are passed through
 // unchanged to preserve column alignment.
