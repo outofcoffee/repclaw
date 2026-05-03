@@ -1,6 +1,6 @@
 # Agent Skills
 
-Agent skills are locally-stored prompt templates that users can inject into a chat session via slash commands (e.g. `/review`). They allow users to define reusable instructions without modifying gateway configuration.
+Agent skills are locally-stored prompt templates that users can inject into a chat session via slash commands (e.g. `/review`). They allow users to define reusable instructions without modifying gateway configuration. A skill can be invoked on its own (`/review`) or referenced mid-message (`use /review on the diff`) — see [Activation](#activation).
 
 ## Skill file format
 
@@ -32,34 +32,56 @@ Discovery runs as a Bubble Tea command in `chatModel.Init()` and returns a `skil
 
 ## Catalog injection
 
-The agent doesn't receive skill information unless it's explicitly included in a message. On the **first user message** of a session, `withSkillCatalog()` (`chat.go`) prepends a skill listing to the outgoing text before it is sent to the gateway:
+The agent doesn't receive skill information unless it's explicitly included in a message. The chat layer passes the discovered skills through `ChatSendParams.Skills`; the OpenClaw backend's `takePendingCatalog()` (`internal/backend/openclaw/openclaw.go`) prepends a skill listing to the **first user message** of each session:
 
 ```
 System: Available agent skills (activate with /skill-name):
 System:   - review: Perform a code review
 ```
 
-Lines are prefixed with `System: ` using the convention described in [message-rendering.md](message-rendering.md). The catalog is sent only once per session (`skillCatalogSent` flag).
+Lines are prefixed with `System: ` using the convention described in [message-rendering.md](message-rendering.md). The catalog is sent only once per session — a per-session flag, mutex-guarded against concurrent sends, prevents re-emission. See [backend_openclaw.md](backend_openclaw.md) for the backend-side detail.
 
 ## Activation
 
-When the user types `/<name>`, `handleSlashCommand()` (`commands.go`) matches it against loaded skills (case-insensitive). On a match:
+A `/skill-name` token is recognised when it sits at the start of a message *or* mid-prose preceded by whitespace, with token characters `[A-Za-z0-9_-]`. Matching is case-insensitive.
 
-1. The skill body is wrapped with a `[Skill: <name>]` header.
-2. Every line is prefixed with `System: ` (see [message-rendering.md](message-rendering.md)).
-3. The resulting text is sent to the gateway as the message content.
-4. The chat display shows the user message as `/<name>` (not the full body).
+`handleSlashCommand()` (`commands.go`) returns `(false, nil)` for any `/`-prefixed input whose first token names a known skill, deferring to the regular Enter-handler send path. Unknown slashes that aren't built-ins still produce an error system message there.
 
-Unknown slash commands that don't match a built-in or a skill name show an error.
+The send path runs `expandSkillReferences(text, skills)` (`skills.go`) before dispatching. When at least one matched skill is found it produces a payload of the form:
 
-Tab completion (`completeSlashCommand()` in `commands.go`) includes skill names alongside built-in commands.
+```
+Please use the following skill:
+
+<local-agent-skill name="review">
+<skill body>
+</local-agent-skill>
+
+run the "review" skill above on the diff
+```
+
+Rules applied by `expandSkillReferences`:
+
+- Each unique matched skill produces one `<local-agent-skill name="...">…</local-agent-skill>` block. Order follows first-occurrence in the prose.
+- Each `/skill-name` token in the prose is replaced with `the "<canonical-name>" skill above`. The canonical name comes from the skill's frontmatter, regardless of how the user typed it.
+- Multiple distinct skills produce a plural preamble (`Please use the following skills:`) and one envelope per skill.
+- A "bare" message — the entire trimmed input is a single `/skill-name` — collapses the prose to `use the "<name>" skill above immediately`.
+
+The visible chat row shows the user-typed text. On history reload the rendered text reflects the post-substitution payload (the gateway has no record of the original prose) — this is a known cosmetic divergence.
+
+`stripLocalAgentSkillBlocks` (`history.go`) elides the preamble line and every `<local-agent-skill>...</local-agent-skill>` block when restoring user messages from history, alongside the `System:` line strip used for the catalog.
+
+### Tab completion
+
+`completeSlashCommand(prefix)` matches built-in commands and skill names by prefix. The Tab handler in `chat.go` works on the slash token under the cursor — not just at the start of input — so `use /rev<TAB>` completes to `use /review`. `findSlashTokenAt(value, cursorByte)` (`commands.go`) locates the token and `setTextareaToValueWithCursor` performs the in-place replacement, repositioning the cursor at the end of the inserted completion.
+
+Completion only fires when the cursor sits at the end of the slash token (next character is whitespace or end-of-buffer); inserting mid-token would clobber the trailing characters.
 
 ## UI commands
 
 | Command | Behaviour |
 |---|---|
 | `/skills` | Lists all discovered skills with their descriptions |
-| `/<name>` | Activates the named skill |
+| `/<name>` | Activates the named skill (alone or with prose) |
 | `/help` | Mentions how many skills are loaded |
 
 The count of loaded skills also appears in the `/stats` table.

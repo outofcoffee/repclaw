@@ -27,7 +27,7 @@ No file browsers, no task boards, no dashboards. Just chat.
 - **Tool call cards** — when the agent invokes a tool, an inline card shows what's running, what arguments it got, and whether it succeeded or failed (OpenClaw)
 - **Shell commands** — run locally with `!` or remotely on the gateway with `!!`
 - **Message queueing** so you can keep typing while the agent is responding
-- **Local agent skills** loaded from `~/.agents/skills/` as slash commands
+- **Local agent skills** loaded from `~/.agents/skills/` — invoke as a slash command (`/review`) or drop one mid-message (`use /review on the diff`)
 - **Live token/cost stats** in the header bar (OpenClaw)
 - **Thinking level control** via `/think` — tune reasoning depth per session (OpenClaw)
 - **Cron browser** — list, edit, run, and create scheduled jobs without leaving the terminal (OpenClaw)

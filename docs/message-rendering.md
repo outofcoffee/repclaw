@@ -10,28 +10,26 @@ Each chat message has a role that determines how it is displayed in the TUI:
 - `separator` — a dim divider row inserted between restored history and a new turn; labelled with the relative time of the most recent restored message (e.g. `Resumed from 2h ago`). The `timestampMs` field on `chatMessage` carries the unix-ms used by `formatSeparatorLabel`.
 - `tool` — inline status card for an in-flight or completed tool call from the agent. See [Tool call cards](#tool-call-cards).
 
-## The System: prefix convention
+## Hiding injected content from history
 
-Some content needs to be sent to the gateway as part of a user message (so the agent sees it) but must not be shown in the local chat history when it is loaded back. The convention is to prefix every such line with `System: `:
+Some content needs to be sent to the gateway as part of a user message (so the agent sees it) but must not be shown in the local chat history when it is loaded back. Lucinate uses two complementary conventions for this.
+
+### System: line prefix
+
+Each line of the block is prefixed with `System: ` (or `System (<qualifier>): ` for gateway-rewritten variants like `System (untrusted):`). `prefixAllLines()` in `internal/tui/skills.go` applies the prefix; `stripSystemLines()` in `internal/tui/history.go` removes matching lines on history reload, and `isSystemLine()` recognises both forms.
+
+This convention is used for the **skill catalog** prepended to the first user message of each session — see [skills.md](skills.md) and [backend_openclaw.md](backend_openclaw.md).
 
 ```
 System: Available agent skills (activate with /skill-name):
 System:   - review: Perform a code review
 ```
 
-`prefixAllLines()` in `internal/tui/skills.go` applies this prefix to a block of text. Content that uses this convention includes:
+### `<local-agent-skill>` envelope
 
-- The skill catalog prepended to the first user message (see [skills.md](skills.md)).
-- Injected skill bodies sent when the user activates a skill.
+When the user invokes a skill (`/review` alone or `use /review on x`), `expandSkillReferences()` in `internal/tui/skills.go` produces a payload prefixed with `Please use the following skill(s):` followed by one or more `<local-agent-skill name="…">…</local-agent-skill>` blocks. `stripLocalAgentSkillBlocks()` in `internal/tui/history.go` elides the preamble line and every block (inclusive) on history reload. See [skills.md](skills.md#activation) for the full payload shape and substitution rules.
 
-## History cleanup
-
-When session history is fetched from the gateway, each user message may contain `System:` prefixed lines that were injected at send time. `stripSystemLines()` in `internal/tui/history.go` removes those lines before the messages are added to the display, so the user only sees what they actually typed.
-
-`isSystemLine()` matches two forms:
-
-- `System: ...` — the standard local prefix.
-- `System (<qualifier>): ...` — a variant the gateway may substitute (e.g. `System (untrusted):`) when rewriting message content for safety reasons.
+Both strippers are applied to user messages on history reload.
 
 ## Markdown rendering
 
