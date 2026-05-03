@@ -8,6 +8,9 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/lucinate-ai/lucinate/internal/config"
 )
 
 // newContextUsageTestModel builds a chatModel wired to fakeBackend with
@@ -203,6 +206,25 @@ func TestHistoryRefreshMsg_TriggersContextUsageRefresh(t *testing.T) {
 	}
 }
 
+// TestNewChatModel_TextareaCursorIsHighContrast guards against a
+// regression where the chat composer's cursor became invisible on the
+// iOS host: Bubbles' default Cursor.Color of `lipgloss.Color("7")`
+// (ANSI 8-colour light grey, no background) reverse-swapped to a dim
+// grey block on SwiftTerm's iOS default-colour pair, which against a
+// dim placeholder character read as black-on-black. ANSI 15 (bright
+// white) is unambiguous on every reasonable palette.
+func TestNewChatModel_TextareaCursorIsHighContrast(t *testing.T) {
+	m := newChatModel(newFakeBackend(), "agent:scout:main", "scout", "scout", "", config.Preferences{}, false, "home")
+	got := m.textarea.Styles().Cursor.Color
+	want := lipgloss.Color("15")
+	if got != want {
+		t.Errorf("textarea cursor color = %v, want %v (ANSI bright white). "+
+			"Falling back to the bubbles default would re-introduce the iOS "+
+			"caret-invisibility regression — see mobile/docs/05-runtime-behaviour.md.",
+			got, want)
+	}
+}
+
 // drainBatch executes every leaf cmd produced by tea.Batch so test
 // hooks get hit even when the batch wraps multiple commands.
 func drainBatch(t *testing.T, cmd tea.Cmd) {
@@ -217,4 +239,3 @@ func drainBatch(t *testing.T, cmd tea.Cmd) {
 		}
 	}
 }
-
