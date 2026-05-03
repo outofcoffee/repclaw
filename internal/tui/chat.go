@@ -274,22 +274,6 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
-	case modelListMsg:
-		if msg.err != nil {
-			m.messages = append(m.messages, chatMessage{role: "system", errMsg: msg.err.Error()})
-		} else {
-			var lines []string
-			for _, mc := range msg.models {
-				lines = append(lines, fmt.Sprintf("  %s (%s)", mc.ID, mc.Provider))
-			}
-			m.messages = append(m.messages, chatMessage{
-				role:    "system",
-				content: "Available models:\n" + strings.Join(lines, "\n") + "\n\nUse /model <name> to switch",
-			})
-		}
-		m.updateViewport()
-		return m, nil
-
 	case modelSwitchedMsg:
 		if msg.err != nil {
 			m.messages = append(m.messages, chatMessage{role: "system", errMsg: msg.err.Error()})
