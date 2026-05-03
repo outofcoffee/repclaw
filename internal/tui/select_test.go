@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/a3tai/openclaw-go/protocol"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lucinate-ai/lucinate/internal/backend"
 )
@@ -486,6 +488,70 @@ func TestSelectModel_ToggleKeepFilesFlipsState(t *testing.T) {
 	m, _ = m.TriggerAction("toggle-keep-files")
 	if m.keepFiles {
 		t.Error("expected keepFiles=false after second toggle")
+	}
+}
+
+// TestSelectModel_FilesModeHighlightMatchesDescription guards against a
+// regression where the highlighted Files mode toggle option pointed to
+// the opposite of the description below — a user-impact bug because
+// they'd think they were keeping files while we were about to delete
+// them (or vice versa).
+func TestSelectModel_FilesModeHighlightMatchesDescription(t *testing.T) {
+	const (
+		keepDesc   = "left in place"
+		deleteDesc = "deleted along with the agent"
+	)
+
+	cases := []struct {
+		name        string
+		keepFiles   bool
+		wantBracket string // the highlighted option, with brackets
+		otherOption string // the option that must not be bracketed
+		wantDesc    string
+		wrongDesc   string
+	}{
+		{
+			name:        "keepFiles=true highlights Keep and shows keep description",
+			keepFiles:   true,
+			wantBracket: "[Keep files]",
+			otherOption: "[Delete files]",
+			wantDesc:    keepDesc,
+			wrongDesc:   deleteDesc,
+		},
+		{
+			name:        "keepFiles=false highlights Delete and shows delete description",
+			keepFiles:   false,
+			wantBracket: "[Delete files]",
+			otherOption: "[Keep files]",
+			wantDesc:    deleteDesc,
+			wrongDesc:   keepDesc,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newSelectModel(nil, false, false, nil, false)
+			m.allowAgentManagement = true
+			m.useWorkspace = true // exercise the gateway-workspace copy path
+			m = loadAgents(m, protocol.AgentSummary{ID: "alpha", Name: "Alpha"})
+			m, _ = m.TriggerAction("delete-agent")
+			m.keepFiles = tc.keepFiles
+
+			view := ansi.Strip(m.viewConfirmDelete())
+
+			if !strings.Contains(view, tc.wantBracket) {
+				t.Errorf("expected highlighted option %q in view, got:\n%s", tc.wantBracket, view)
+			}
+			if strings.Contains(view, tc.otherOption) {
+				t.Errorf("expected %q NOT to be highlighted (would invert the toggle), got:\n%s", tc.otherOption, view)
+			}
+			if !strings.Contains(view, tc.wantDesc) {
+				t.Errorf("expected description containing %q, got:\n%s", tc.wantDesc, view)
+			}
+			if strings.Contains(view, tc.wrongDesc) {
+				t.Errorf("description %q is the opposite of the highlighted toggle — inverted hint regression", tc.wrongDesc)
+			}
+		})
 	}
 }
 
