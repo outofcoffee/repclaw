@@ -785,7 +785,7 @@ func hasTranscriptContent(job protocol.CronJob, runs []protocol.CronRunLogEntry)
 		return false
 	}
 	for _, r := range runs {
-		if r.Summary != "" || r.Error != "" {
+		if r.Summary != "" || r.Error != "" || r.DeliveryError != "" {
 			return true
 		}
 	}

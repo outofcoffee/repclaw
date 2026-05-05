@@ -102,8 +102,11 @@ func fetchHistory(b backend.Backend, sessionKey string, renderer *glamour.TermRe
 // each run's summary/error are persisted in the run log — which is
 // what the cron-detail run-history previews already display. This
 // surfaces the same content as a normal-looking conversation: each run
-// becomes a separator, a user turn (the payload), and an assistant turn
-// (the summary, or the error if the run failed).
+// becomes a separator, a user turn (the payload), an assistant turn
+// (the summary, or the error if the run produced no output), and a
+// trailing system error note if the run logged an error or delivery
+// failure alongside the summary — the agent's work succeeded but the
+// run was marked failed for an ancillary reason worth surfacing.
 func buildCronTranscriptMessages(payload string, runs []protocol.CronRunLogEntry, renderer *glamour.TermRenderer) []chatMessage {
 	if len(runs) == 0 {
 		return nil
@@ -124,6 +127,7 @@ func buildCronTranscriptMessages(payload string, runs []protocol.CronRunLogEntry
 		if payload != "" {
 			msgs = append(msgs, chatMessage{role: "user", content: payload, timestampMs: ts})
 		}
+		errNote := cronRunErrorNote(r)
 		switch {
 		case r.Summary != "":
 			content := r.Summary
@@ -137,11 +141,33 @@ func buildCronTranscriptMessages(payload string, runs []protocol.CronRunLogEntry
 				}
 			}
 			msgs = append(msgs, chatMessage{role: "assistant", content: content, raw: raw, rendered: rendered, timestampMs: ts})
-		case r.Error != "":
-			msgs = append(msgs, chatMessage{role: "assistant", errMsg: r.Error, timestampMs: ts})
+			if errNote != "" {
+				msgs = append(msgs, chatMessage{role: "system", errMsg: errNote, timestampMs: ts})
+			}
+		case errNote != "":
+			msgs = append(msgs, chatMessage{role: "assistant", errMsg: errNote, timestampMs: ts})
 		}
 	}
 	return msgs
+}
+
+// cronRunErrorNote joins the run-level error and delivery-level error
+// into a single reader-friendly string, deduping when the gateway has
+// echoed the same text into both fields.
+func cronRunErrorNote(r protocol.CronRunLogEntry) string {
+	var parts []string
+	seen := map[string]bool{}
+	add := func(label, val string) {
+		v := strings.TrimSpace(val)
+		if v == "" || seen[v] {
+			return
+		}
+		seen[v] = true
+		parts = append(parts, label+": "+v)
+	}
+	add("Run error", r.Error)
+	add("Delivery error", r.DeliveryError)
+	return strings.Join(parts, "\n")
 }
 
 // stripSystemLines removes "System:" prefixed lines and leading whitespace
