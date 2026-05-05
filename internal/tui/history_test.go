@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/a3tai/openclaw-go/protocol"
@@ -28,7 +29,7 @@ func TestBuildCronTranscriptMessages_ChronologicalAndCoversBothOutcomes(t *testi
 	if msgs[1].role != "user" || msgs[1].content != "Check the balance." {
 		t.Errorf("msgs[1] should be user payload for older run; got %+v", msgs[1])
 	}
-	if msgs[2].role != "assistant" || msgs[2].errMsg != "older run blew up" {
+	if msgs[2].role != "assistant" || msgs[2].errMsg != "Run error: older run blew up" {
 		t.Errorf("msgs[2] should be assistant error for older run; got %+v", msgs[2])
 	}
 	if msgs[3].role != "separator" || msgs[3].timestampMs != newer {
@@ -42,6 +43,67 @@ func TestBuildCronTranscriptMessages_ChronologicalAndCoversBothOutcomes(t *testi
 func TestBuildCronTranscriptMessages_EmptyRunsReturnsNil(t *testing.T) {
 	if msgs := buildCronTranscriptMessages("payload", nil, nil); msgs != nil {
 		t.Errorf("expected nil for empty run log; got %+v", msgs)
+	}
+}
+
+func TestBuildCronTranscriptMessages_DeliveryErrorAfterSummary(t *testing.T) {
+	// Real-world case: the agent ran fine and produced a summary, but
+	// the gateway couldn't route the announcement so the run was logged
+	// status=error with the actual work intact in Summary. The
+	// transcript must show both — the summary and the delivery failure.
+	ts := int64(1_000)
+	runs := []protocol.CronRunLogEntry{
+		{
+			RunAtMs:       &ts,
+			Status:        "error",
+			Summary:       "Total Balance: $9.12",
+			DeliveryError: "Delivering to Telegram requires target",
+		},
+	}
+
+	msgs := buildCronTranscriptMessages("Check balance.", runs, nil)
+
+	if len(msgs) != 4 {
+		t.Fatalf("expected separator+user+assistant+system note, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[2].role != "assistant" || msgs[2].content != "Total Balance: $9.12" {
+		t.Errorf("msgs[2] should carry the assistant summary; got %+v", msgs[2])
+	}
+	if msgs[3].role != "system" || !strings.Contains(msgs[3].errMsg, "Delivery error: Delivering to Telegram requires target") {
+		t.Errorf("msgs[3] should be a system note carrying the delivery error; got %+v", msgs[3])
+	}
+}
+
+func TestBuildCronTranscriptMessages_RunErrorOnlyStaysOnAssistantTurn(t *testing.T) {
+	ts := int64(1_000)
+	runs := []protocol.CronRunLogEntry{
+		{RunAtMs: &ts, Status: "error", Error: "boom"},
+	}
+
+	msgs := buildCronTranscriptMessages("Check.", runs, nil)
+
+	if len(msgs) != 3 {
+		t.Fatalf("expected separator+user+assistant, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[2].role != "assistant" || msgs[2].errMsg != "Run error: boom" {
+		t.Errorf("msgs[2] should carry the run error as assistant errMsg; got %+v", msgs[2])
+	}
+}
+
+func TestBuildCronTranscriptMessages_DedupesIdenticalRunAndDeliveryError(t *testing.T) {
+	ts := int64(1_000)
+	runs := []protocol.CronRunLogEntry{
+		{RunAtMs: &ts, Status: "error", Error: "boom", DeliveryError: "boom"},
+	}
+
+	msgs := buildCronTranscriptMessages("Check.", runs, nil)
+
+	// One assistant turn carrying the dedup'd note — not two of the same line.
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %+v", len(msgs), msgs)
+	}
+	if got := msgs[2].errMsg; got != "Run error: boom" {
+		t.Errorf("expected dedup'd 'Run error: boom'; got %q", got)
 	}
 }
 
