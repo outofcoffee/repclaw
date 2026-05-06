@@ -112,6 +112,10 @@ fi
 
 info "Preparing gateway state directory"
 STATE_DIR="$SCRIPT_DIR/state"
+# Wipe any leftover state so the gateway starts with no paired devices —
+# otherwise the local keypair may match a previously-paired entry and the
+# device skips the pending-registration step the script relies on.
+rm -rf "$STATE_DIR"
 mkdir -p "$STATE_DIR"
 cp "$SCRIPT_DIR/openclaw.${PROVIDER}.json" "$STATE_DIR/openclaw.json"
 ok "State directory ready at $STATE_DIR"
