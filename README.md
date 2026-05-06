@@ -200,18 +200,18 @@ lucinate send --connection my-con --agent main "summarise this PR description"
 
 | Flag | Description |
 |------|-------------|
-| `--connection` | Saved connection name or ID (case-insensitive on name). Required. |
-| `--agent` | Agent name or ID within the connection (case-insensitive on name). Required. |
-| `--session` | Session key. Defaults to the agent's main session — same default the picker would pick. |
-| `--detach` | Dispatch the message and exit as soon as the gateway accepts the turn. No reply is awaited. |
+| `--connection`, `-c` | Saved connection name or ID (case-insensitive on name). Required. |
+| `--agent`, `-a` | Agent name or ID within the connection (case-insensitive on name). Required. |
+| `--session`, `-s` | Session key. Defaults to the agent's main session — same default the picker would pick. |
+| `--detach`, `-d` | Dispatch the message and exit as soon as the gateway accepts the turn. No reply is awaited. |
 
 The reply is written to stdout with a single trailing newline. Errors go to stderr; the exit code is non-zero on failure. Messages that begin with a dash should be preceded by `--` (the standard Unix escape) so the flag parser leaves them alone.
 
 A couple of patterns this enables:
 
 ```sh
-# capture a reply into a shell variable
-reply=$(lucinate send --connection my-con --agent main "what's the changelog entry for this commit?")
+# capture a reply into a shell variable (short flags work too)
+reply=$(lucinate send -c my-con -a main "what's the changelog entry for this commit?")
 echo "$reply" | tee notes.md
 
 # fire-and-forget from cron — the run continues server-side, the next TUI session sees the reply
@@ -230,9 +230,9 @@ lucinate chat --connection my-con --agent main "kick things off"
 
 | Flag | Description |
 |------|-------------|
-| `--connection` | Saved connection name or ID (case-insensitive on name). Optional — defaults to the same auto-pick the bare `lucinate` uses. |
-| `--agent` | Agent name or ID to auto-select. A miss surfaces as an error on the picker rather than silently picking the wrong one. |
-| `--session` | Session key to open. Defaults to the agent's main session — same default the picker would pick. |
+| `--connection`, `-c` | Saved connection name or ID (case-insensitive on name). Optional — defaults to the same auto-pick the bare `lucinate` uses. |
+| `--agent`, `-a` | Agent name or ID to auto-select. A miss surfaces as an error on the picker rather than silently picking the wrong one. |
+| `--session`, `-s` | Session key to open. Defaults to the agent's main session — same default the picker would pick. |
 
 Every flag is optional. `lucinate chat` with no flags and no message is functionally identical to bare `lucinate`. Messages that begin with a dash should be preceded by `--`, same Unix escape as `send`.
 
