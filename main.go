@@ -99,12 +99,16 @@ func runSend(args []string) error {
 		detach     bool
 	)
 	fs.StringVar(&connection, "connection", "", "saved connection name or ID (required)")
+	fs.StringVar(&connection, "c", "", "short for --connection")
 	fs.StringVar(&agent, "agent", "", "agent name or ID within the connection (required)")
+	fs.StringVar(&agent, "a", "", "short for --agent")
 	fs.StringVar(&session, "session", "", "session key (defaults to the agent's main session)")
+	fs.StringVar(&session, "s", "", "short for --session")
 	fs.BoolVar(&detach, "detach", false, "dispatch the message and exit without waiting for a reply")
+	fs.BoolVar(&detach, "d", false, "short for --detach")
 	fs.Usage = func() {
 		out := fs.Output()
-		fmt.Fprintln(out, "Usage: lucinate send --connection <name> --agent <name> [--session <key>] [--detach] <message...>")
+		fmt.Fprintln(out, "Usage: lucinate send (--connection|-c) <name> (--agent|-a) <name> [(--session|-s) <key>] [--detach|-d] <message...>")
 		fmt.Fprintln(out, "")
 		fmt.Fprintln(out, "Sends a single chat message through a stored connection and prints the")
 		fmt.Fprintln(out, "assistant's first complete reply on stdout. With --detach the call returns")
@@ -150,11 +154,14 @@ func runChat(args []string) error {
 		session    string
 	)
 	fs.StringVar(&connection, "connection", "", "saved connection name or ID (defaults to the auto-pick)")
+	fs.StringVar(&connection, "c", "", "short for --connection")
 	fs.StringVar(&agent, "agent", "", "agent name or ID to auto-select after connecting")
+	fs.StringVar(&agent, "a", "", "short for --agent")
 	fs.StringVar(&session, "session", "", "session key to open (defaults to the agent's main session)")
+	fs.StringVar(&session, "s", "", "short for --session")
 	fs.Usage = func() {
 		out := fs.Output()
-		fmt.Fprintln(out, "Usage: lucinate chat [--connection <name>] [--agent <name>] [--session <key>] [<message...>]")
+		fmt.Fprintln(out, "Usage: lucinate chat [(--connection|-c) <name>] [(--agent|-a) <name>] [(--session|-s) <key>] [<message...>]")
 		fmt.Fprintln(out, "")
 		fmt.Fprintln(out, "Launches the TUI pre-navigated to the named connection / agent / session,")
 		fmt.Fprintln(out, "optionally auto-submitting the supplied message as the first turn. Any")
