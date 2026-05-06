@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-05-06
+### Added
+- feat: allow embedders to enable bright cursor
+
+### Changed
+- test: shorten integration test token
+
+### Fixed
+- fix(test): wipe gateway state before integration setup
+
 ## [1.9.0] - 2026-05-06
 ### Added
 - feat(tui): surface delivery errors in cron run transcripts
