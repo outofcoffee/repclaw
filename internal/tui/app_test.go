@@ -305,6 +305,35 @@ func runCmd(t *testing.T, cmd tea.Cmd) {
 	}
 }
 
+// TestAppModel_SessionCreatedError_ClearsSelectingLock: an error from
+// CreateSession bounces the user back to the agent picker; the picker's
+// `selecting` flag must be cleared in the same step so it doesn't stay
+// frozen on the loading line forever. Without this, the user would be
+// staring at "Loading <agent>..." with no way to retry — selecting
+// would still gate every keystroke into a no-op.
+func TestAppModel_SessionCreatedError_ClearsSelectingLock(t *testing.T) {
+	m := AppModel{state: viewSelect}
+	m.selectModel = newSelectModel(nil, false, false, nil, false, "")
+	m.selectModel.loading = false
+	m.selectModel.selecting = true
+	m.selectModel.selectingName = "Alpha"
+
+	next, _ := m.update(sessionCreatedMsg{err: errors.New("boom")})
+
+	if next.selectModel.selecting {
+		t.Error("selecting must be cleared so the user isn't stuck on the loading line")
+	}
+	if next.selectModel.selectingName != "" {
+		t.Errorf("selectingName not cleared: %q", next.selectModel.selectingName)
+	}
+	if next.selectModel.err == nil {
+		t.Error("expected the error to be surfaced on the picker")
+	}
+	if next.state != viewSelect {
+		t.Errorf("state = %v, want viewSelect", next.state)
+	}
+}
+
 // TestAppModel_CreateSessionHonoursRequestTimeout: a stuck CreateSession
 // (the symptom seen after first-time pairing, where the freshly
 // authenticated connection silently drops the RPC) must surface as a

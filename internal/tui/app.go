@@ -656,6 +656,11 @@ func (m AppModel) update(msg tea.Msg) (AppModel, tea.Cmd) {
 	case sessionCreatedMsg:
 		if msg.err != nil {
 			m.selectModel.err = msg.err
+			// Drop the selection-loading lock so the user can
+			// retry / pick a different agent — without this the
+			// picker would stay frozen on the loading line.
+			m.selectModel.selecting = false
+			m.selectModel.selectingName = ""
 			m.state = viewSelect
 			return m, nil
 		}
