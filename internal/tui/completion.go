@@ -24,7 +24,9 @@ type completionMenuState struct {
 
 // completionMenuMaxRows caps the number of candidate rows rendered in
 // the completion menu before collapsing the tail into a "+N more" line.
-const completionMenuMaxRows = 10
+// Tuned low to keep the chat viewport breathable; users narrow the list
+// by typing rather than scrolling the menu.
+const completionMenuMaxRows = 4
 
 // completionMenuViewportFloor is the minimum number of viewport rows
 // the completion menu will leave visible. On terminals too short to
