@@ -714,19 +714,29 @@ func TestBackend_SessionCompact_SummarisesAndPreservesTail(t *testing.T) {
 	if captured.Model != "m" {
 		t.Errorf("compact used wrong model: %q", captured.Model)
 	}
-	// The compaction prompt is the first system message; older user/assistant
-	// pair follows. Last four messages must NOT be in the request — they're
-	// preserved verbatim in the rewritten history.
-	if len(captured.Messages) < 3 {
-		t.Fatalf("expected compaction system prompt + older messages, got %d", len(captured.Messages))
+	// Wire shape: exactly two messages — the system prompt and a
+	// user-role transcript dump. Forwarding the older slice as a
+	// raw user/assistant sequence ends the request on role: assistant
+	// and OpenAI-compat servers (Ollama, vLLM) respond with empty
+	// content because they think the conversation is complete.
+	if len(captured.Messages) != 2 {
+		t.Fatalf("expected exactly 2 messages (system + user transcript), got %d: %+v", len(captured.Messages), captured.Messages)
 	}
 	if captured.Messages[0].Role != "system" || !strings.Contains(captured.Messages[0].Content, "compacting") {
 		t.Errorf("first message should be the compaction system prompt, got %+v", captured.Messages[0])
 	}
-	for _, m := range captured.Messages {
-		if strings.Contains(m.Content, "thanks") || strings.Contains(m.Content, "you're welcome") {
-			t.Errorf("tail message leaked into compaction request: %+v", m)
-		}
+	if captured.Messages[1].Role != "user" {
+		t.Errorf("transcript dump must be role: user so the request ends on a user turn, got %q", captured.Messages[1].Role)
+	}
+	transcript := captured.Messages[1].Content
+	if !strings.Contains(transcript, "user: what colours are in a rainbow?") {
+		t.Errorf("transcript missing earliest user turn:\n%s", transcript)
+	}
+	if !strings.Contains(transcript, "assistant: ROYGBIV") {
+		t.Errorf("transcript missing earliest assistant turn:\n%s", transcript)
+	}
+	if strings.Contains(transcript, "thanks") || strings.Contains(transcript, "you're welcome") {
+		t.Errorf("tail message leaked into compaction request: %s", transcript)
 	}
 
 	rewritten, err := b.store.LoadHistory("a", 0)
@@ -893,6 +903,33 @@ func TestBackend_SessionCompact_EmptySummaryRejected(t *testing.T) {
 	msgs, _ := b.store.LoadHistory("a", 0)
 	if len(msgs) != compactMinHistory {
 		t.Errorf("expected history untouched after failed compact, got %d messages", len(msgs))
+	}
+}
+
+// TestRenderTranscriptForCompact pins the transcript-dump shape that
+// drives /compact: a labelled "role: content" block, summaries
+// rendered under a "summary" label so prior digests fold in, and
+// non-summary system messages dropped defensively. The shape is
+// load-bearing because it lives inside a single role: user message —
+// see summarise() for why ending the request on role: assistant
+// breaks Ollama and friends.
+func TestRenderTranscriptForCompact(t *testing.T) {
+	got := renderTranscriptForCompact([]Message{
+		{Role: "system", Content: "stale system prompt"},
+		{Role: "system", Content: "earlier digest", Summary: true},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi there"},
+		{Role: "user", Content: ""}, // dropped (empty content)
+	})
+	want := "summary: earlier digest\n\nuser: hello\n\nassistant: hi there"
+	if got != want {
+		t.Errorf("renderTranscriptForCompact mismatch:\n got %q\nwant %q", got, want)
+	}
+	if got := renderTranscriptForCompact(nil); got != "" {
+		t.Errorf("nil older slice should render as empty, got %q", got)
+	}
+	if got := renderTranscriptForCompact([]Message{{Role: "system", Content: "drop me"}}); got != "" {
+		t.Errorf("only non-summary system messages should render as empty, got %q", got)
 	}
 }
 

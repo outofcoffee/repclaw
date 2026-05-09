@@ -506,12 +506,22 @@ const compactMinHistory = compactKeepTail + 2
 // summarising older turns. The output replaces those messages on disk
 // as a single system-role entry, so the prompt asks for a dense,
 // self-contained recap rather than chat-style prose.
-const compactSystemPrompt = `You are compacting an ongoing chat transcript so the conversation can continue with a smaller context window. Produce a dense factual summary of the messages provided, preserving:
+const compactSystemPrompt = `You are compacting an ongoing chat transcript so the conversation can continue with a smaller context window. Produce a dense factual summary of the transcript provided, preserving:
 - the user's goals and any open questions
 - decisions, conclusions, and code or data the assistant produced
 - any constraints, preferences, or facts the user established
 
 Write the summary as a single passage in the third person ("the user asked …", "the assistant explained …"). Do not address the user directly, do not include greetings, and do not invent information. Output only the summary text.`
+
+// compactUserPreamble introduces the transcript dump in the single
+// role: user message that drives the summarisation. The transcript
+// must arrive embedded in a user turn — forwarding it as the literal
+// user/assistant message sequence makes the request end on
+// role: assistant, which OpenAI-compatible servers (Ollama, vLLM,
+// llama.cpp) interpret as "the conversation is complete" and either
+// return an empty completion or generate a follow-up turn instead of
+// the summary we asked for.
+const compactUserPreamble = "Below is the transcript to summarise. Output only the summary text.\n\n"
 
 // SessionCompact runs a local summarisation pass: load the agent's
 // transcript, ask the configured model to summarise everything except
@@ -573,31 +583,34 @@ func (b *Backend) SessionCompact(ctx context.Context, sessionKey string) error {
 
 // summarise issues a /v1/chat/completions request with the compaction
 // prompt and returns the assistant's reply text. The older transcript
-// is forwarded verbatim — including any prior summary produced by an
-// earlier /compact, so the new digest folds the old one in rather
-// than dropping it.
+// is dumped into a single role: user message — including any prior
+// summary produced by an earlier /compact, so the new digest folds
+// the old one in rather than dropping it.
 //
 // Streaming is used here for the same reason it's used for regular
-// chat sends: some OpenAI-compatible servers (notably Ollama with
-// reasoning-capable models) return an empty `message.content` on the
-// non-streaming path while the streamed `delta.content` deltas
-// produce the actual answer. Accumulating deltas is the well-trodden
-// path that works across the whole compatibility matrix; the events
-// channel is intentionally not touched so /compact stays invisible
-// in the chat transcript.
+// chat sends: some OpenAI-compatible servers return an empty
+// `message.content` on the non-streaming path while the streamed
+// `delta.content` deltas produce the actual answer. Accumulating
+// deltas is the well-trodden path that works across the whole
+// compatibility matrix; the events channel is intentionally not
+// touched so /compact stays invisible in the chat transcript.
+//
+// The transcript is rendered as a labelled text block inside one
+// user turn rather than a sequence of user/assistant messages because
+// the messages array must end with role: user for the model to
+// generate a reply — ending on role: assistant (which our older slice
+// usually does) tells Ollama/vLLM/llama.cpp the conversation is done
+// and the model returns an empty completion or a stray follow-up.
 func (b *Backend) summarise(ctx context.Context, model string, older []Message) (string, error) {
-	body := chatRequest{Model: model, Stream: true}
-	body.Messages = append(body.Messages, chatRequestMessage{Role: "system", Content: compactSystemPrompt})
-	for _, msg := range older {
-		// Forward earlier summaries (Role=="system" && Summary) so the
-		// recursion folds prior digests into the new one. Skip any
-		// other system messages defensively — they shouldn't appear in
-		// history.jsonl, but if they did they'd confuse the model.
-		if msg.Role == "system" && !msg.Summary {
-			continue
-		}
-		body.Messages = append(body.Messages, chatRequestMessage{Role: msg.Role, Content: msg.Content})
+	transcript := renderTranscriptForCompact(older)
+	if transcript == "" {
+		return "", nil
 	}
+	body := chatRequest{Model: model, Stream: true}
+	body.Messages = append(body.Messages,
+		chatRequestMessage{Role: "system", Content: compactSystemPrompt},
+		chatRequestMessage{Role: "user", Content: compactUserPreamble + transcript},
+	)
 
 	req, err := b.http.NewRequest(ctx, http.MethodPost, "/chat/completions", body)
 	if err != nil {
@@ -646,6 +659,35 @@ func (b *Backend) StoreAPIKey(key string) error {
 }
 
 // --- internals ---
+
+// renderTranscriptForCompact dumps the older slice of history as a
+// labelled plain-text block ("user: …" / "assistant: …" / "summary: …")
+// for embedding inside the single role: user message that drives the
+// compaction. Earlier summaries written by a previous /compact are
+// included so the new digest folds in detail accumulated across
+// passes; non-summary system messages are filtered out defensively.
+// Returns an empty string when nothing remains after filtering, so
+// the caller can short-circuit a wasted round-trip.
+func renderTranscriptForCompact(older []Message) string {
+	var b strings.Builder
+	for _, msg := range older {
+		role := msg.Role
+		if role == "system" {
+			if !msg.Summary {
+				continue
+			}
+			role = "summary"
+		}
+		if msg.Content == "" {
+			continue
+		}
+		b.WriteString(role)
+		b.WriteString(": ")
+		b.WriteString(msg.Content)
+		b.WriteString("\n\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
 
 // skillCatalogSystemMessage formats the local skill catalog as a
 // real role:system message body. Returns the empty string when no

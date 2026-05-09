@@ -86,4 +86,6 @@ Streaming (rather than non-streaming) is intentional: some Ollama setups, partic
 
 The `Summary` flag is what distinguishes a compact-produced digest from the legacy "skip stored system messages" defence in `runStream`: messages with `Summary: true` are forwarded on every turn after compaction, while any other `role: "system"` line in `history.jsonl` is still ignored. `ChatHistory` mirrors the same rule so the digest renders in the chat view rather than vanishing on history refresh.
 
-A previously-compacted session that gets compacted again folds the existing summary into the new one — `summarise()` forwards the prior summary to the model in the same shape as a regular message, so multiple compactions don't lose detail accumulated across earlier passes.
+A previously-compacted session that gets compacted again folds the existing summary into the new one — `renderTranscriptForCompact` includes prior summaries under a `summary:` label so multiple compactions don't lose detail accumulated across earlier passes.
+
+The transcript is dumped as labelled text inside a single `role: user` message, not forwarded as the literal user/assistant message sequence. Forwarding raw turns ends the request on `role: assistant` — and OpenAI-compatible servers (Ollama, vLLM, llama.cpp) interpret that as "the conversation is complete" and respond with empty content, defeating the summarisation. Wrapping the transcript in a user turn lets the model treat it as input data and produce the summary as a normal reply.
