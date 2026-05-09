@@ -610,29 +610,19 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			}
 			return m, nil
 		case "tab":
-			value := m.textarea.Value()
-			cursorByte := textareaCursorByteOffset(&m.textarea)
-			if start, prefix, ok := findSlashTokenAt(value, cursorByte); ok {
-				m.handleSlashTab(value, start, cursorByte, prefix)
-				return m, nil
-			}
-			if start, prefix, ok := findAgentArgAt(value, cursorByte); ok {
-				if match := m.completeAgentName(prefix); match != "" && !strings.EqualFold(match, prefix) {
-					newValue := value[:start] + match + value[cursorByte:]
-					setTextareaToValueWithCursor(&m.textarea, newValue, start+len(match))
-				}
+			if ctx, ok := m.completionAtCursor(); ok {
+				m.handleCompletionTab(ctx)
 			}
 			return m, nil
 		case "shift+tab":
 			if m.completion.cycling && len(m.completion.cycleCandidates) > 0 {
-				value := m.textarea.Value()
-				cursorByte := textareaCursorByteOffset(&m.textarea)
-				if start, _, ok := findSlashTokenAt(value, cursorByte); ok {
+				if ctx, ok := m.completionAtCursor(); ok {
+					value := m.textarea.Value()
 					n := len(m.completion.cycleCandidates)
 					m.completion.cycleIndex = (m.completion.cycleIndex - 1 + n) % n
 					pick := m.completion.cycleCandidates[m.completion.cycleIndex]
-					newValue := value[:start] + pick + value[cursorByte:]
-					setTextareaToValueWithCursor(&m.textarea, newValue, start+len(pick))
+					newValue := value[:ctx.start] + pick + value[ctx.cursorByte:]
+					setTextareaToValueWithCursor(&m.textarea, newValue, ctx.start+len(pick))
 				}
 			}
 			return m, nil

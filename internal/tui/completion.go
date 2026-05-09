@@ -58,6 +58,47 @@ func longestCommonPrefix(strs []string) string {
 	return prefix
 }
 
+// longestCommonPrefixFold returns the longest case-insensitive (ASCII fold)
+// prefix shared by every string in strs, taken from the first candidate's
+// casing — so the inserted text reads naturally next to the user's cursor.
+// Used for sources whose candidates carry mixed casing (e.g. agent names);
+// for already-lowercase data it produces the same result as
+// longestCommonPrefix.
+func longestCommonPrefixFold(strs []string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	first := strs[0]
+	if first == "" {
+		return ""
+	}
+	n := len(first)
+	for _, s := range strs[1:] {
+		if len(s) < n {
+			n = len(s)
+		}
+		i := 0
+		for i < n {
+			a, b := first[i], s[i]
+			if a >= 'A' && a <= 'Z' {
+				a += 'a' - 'A'
+			}
+			if b >= 'A' && b <= 'Z' {
+				b += 'a' - 'A'
+			}
+			if a != b {
+				break
+			}
+			i++
+		}
+		n = i
+		if n == 0 {
+			return ""
+		}
+	}
+	return first[:n]
+}
+
 // matchingSlashCommands returns every slash command whose lowercased form
 // has prefix as a prefix. Built-ins come first in their curated order
 // (preserving the /agents-before-/agent etc. tiebreaks used by the legacy
@@ -89,24 +130,86 @@ func (m *chatModel) matchingSlashCommands(prefix string) []string {
 	return out
 }
 
-// handleSlashTab implements the Tab semantics for slash-command
-// completion: extend to longest common prefix on the first useful press,
-// then cycle candidates on subsequent presses while still at the LCP.
-//
-// value/start/cursorByte and prefix are the textarea snapshot already
-// resolved by the caller via findSlashTokenAt.
-func (m *chatModel) handleSlashTab(value string, start, cursorByte int, prefix string) {
+// matchingAgentNames returns every agent name whose lowercased form has
+// prefix as a prefix, preserving each agent's original casing in the
+// returned slice. Empty prefix matches every loaded agent. Returns nil
+// when m.agentNames hasn't been populated yet — Tab silently no-ops in
+// that case, matching the legacy completeAgentName behaviour.
+func (m *chatModel) matchingAgentNames(prefix string) []string {
+	if len(m.agentNames) == 0 {
+		return nil
+	}
+	if prefix == "" {
+		out := make([]string, len(m.agentNames))
+		copy(out, m.agentNames)
+		return out
+	}
+	lower := strings.ToLower(prefix)
+	var out []string
+	for _, n := range m.agentNames {
+		if strings.HasPrefix(strings.ToLower(n), lower) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// completionContext describes the completable token at the cursor: where
+// it begins, where the cursor sits, what the user has typed, and the
+// candidate list for that prefix. Sources differ (slash commands +
+// skills vs. agent names) but the menu/Tab/cycle machinery is uniform.
+type completionContext struct {
+	start      int
+	cursorByte int
+	prefix     string
+	candidates []string
+}
+
+// completionAtCursor returns the active completion context at the
+// textarea cursor. Slash commands take priority over agent-name
+// completion — the latter only applies inside the special "/agent "
+// argument context. Returns ok=false when no source applies.
+func (m *chatModel) completionAtCursor() (completionContext, bool) {
+	value := m.textarea.Value()
+	cursorByte := textareaCursorByteOffset(&m.textarea)
+	if start, prefix, ok := findSlashTokenAt(value, cursorByte); ok {
+		return completionContext{
+			start:      start,
+			cursorByte: cursorByte,
+			prefix:     prefix,
+			candidates: m.matchingSlashCommands(prefix),
+		}, true
+	}
+	if start, prefix, ok := findAgentArgAt(value, cursorByte); ok {
+		return completionContext{
+			start:      start,
+			cursorByte: cursorByte,
+			prefix:     prefix,
+			candidates: m.matchingAgentNames(prefix),
+		}, true
+	}
+	return completionContext{}, false
+}
+
+// handleCompletionTab implements the Tab semantics for the active
+// completion source: extend to longest common prefix on the first useful
+// press, then cycle candidates on subsequent presses while still at the
+// LCP. The candidate list is sourced from ctx — slash commands, skills,
+// or agent names — so a single state machine drives both menus.
+func (m *chatModel) handleCompletionTab(ctx completionContext) {
+	value := m.textarea.Value()
+
 	// If we're already cycling and the user hasn't typed since, advance
 	// the index. Detected by checking that the current token is one of
 	// the snapshotted cycleCandidates — refreshCompletionMenu would have
 	// flipped cycling=false on any non-Tab keystroke.
 	if m.completion.cycling && len(m.completion.cycleCandidates) > 0 {
 		for _, c := range m.completion.cycleCandidates {
-			if strings.EqualFold(c, prefix) {
+			if strings.EqualFold(c, ctx.prefix) {
 				m.completion.cycleIndex = (m.completion.cycleIndex + 1) % len(m.completion.cycleCandidates)
 				pick := m.completion.cycleCandidates[m.completion.cycleIndex]
-				newValue := value[:start] + pick + value[cursorByte:]
-				setTextareaToValueWithCursor(&m.textarea, newValue, start+len(pick))
+				newValue := value[:ctx.start] + pick + value[ctx.cursorByte:]
+				setTextareaToValueWithCursor(&m.textarea, newValue, ctx.start+len(pick))
 				return
 			}
 		}
@@ -116,38 +219,34 @@ func (m *chatModel) handleSlashTab(value string, start, cursorByte int, prefix s
 		m.completion.cycleCandidates = nil
 	}
 
-	cands := m.matchingSlashCommands(prefix)
 	switch {
-	case len(cands) == 0:
-		// No candidates — leave the textarea untouched.
+	case len(ctx.candidates) == 0:
 		return
-	case len(cands) == 1:
-		// Single match — full completion.
-		newValue := value[:start] + cands[0] + value[cursorByte:]
-		setTextareaToValueWithCursor(&m.textarea, newValue, start+len(cands[0]))
+	case len(ctx.candidates) == 1:
+		pick := ctx.candidates[0]
+		newValue := value[:ctx.start] + pick + value[ctx.cursorByte:]
+		setTextareaToValueWithCursor(&m.textarea, newValue, ctx.start+len(pick))
 		m.refreshCompletionMenu()
 		return
 	}
 
-	lcp := longestCommonPrefix(cands)
-	lowerPrefix := strings.ToLower(prefix)
-	if len(lcp) > len(lowerPrefix) {
-		// Extend up to the shared prefix.
-		newValue := value[:start] + lcp + value[cursorByte:]
-		setTextareaToValueWithCursor(&m.textarea, newValue, start+len(lcp))
+	lcp := longestCommonPrefixFold(ctx.candidates)
+	if len(lcp) > len(ctx.prefix) {
+		newValue := value[:ctx.start] + lcp + value[ctx.cursorByte:]
+		setTextareaToValueWithCursor(&m.textarea, newValue, ctx.start+len(lcp))
 		m.refreshCompletionMenu()
 		return
 	}
 
 	// At LCP with multiple matches — start cycling.
 	m.completion.cycling = true
-	m.completion.cycleCandidates = cands
+	m.completion.cycleCandidates = ctx.candidates
 	m.completion.cycleIndex = 0
-	pick := cands[0]
-	newValue := value[:start] + pick + value[cursorByte:]
-	setTextareaToValueWithCursor(&m.textarea, newValue, start+len(pick))
+	pick := ctx.candidates[0]
+	newValue := value[:ctx.start] + pick + value[ctx.cursorByte:]
+	setTextareaToValueWithCursor(&m.textarea, newValue, ctx.start+len(pick))
 	m.completion.visible = true
-	m.completion.candidates = cands
+	m.completion.candidates = ctx.candidates
 	m.applyLayout()
 }
 
@@ -244,9 +343,7 @@ func (m *chatModel) applyLayout() {
 // Any visit here resets cycling=false because, by definition, the
 // user has typed something other than Tab.
 func (m *chatModel) refreshCompletionMenu() {
-	value := m.textarea.Value()
-	cursorByte := textareaCursorByteOffset(&m.textarea)
-	_, prefix, ok := findSlashTokenAt(value, cursorByte)
+	ctx, ok := m.completionAtCursor()
 
 	m.completion.cycling = false
 	m.completion.cycleCandidates = nil
@@ -254,17 +351,7 @@ func (m *chatModel) refreshCompletionMenu() {
 
 	wasVisible := m.completion.visible
 
-	if !ok {
-		if wasVisible {
-			m.completion.visible = false
-			m.completion.candidates = nil
-			m.applyLayout()
-		}
-		return
-	}
-
-	cands := m.matchingSlashCommands(prefix)
-	if len(cands) == 0 {
+	if !ok || len(ctx.candidates) == 0 {
 		if wasVisible {
 			m.completion.visible = false
 			m.completion.candidates = nil
@@ -275,9 +362,9 @@ func (m *chatModel) refreshCompletionMenu() {
 
 	prevLen := len(m.completion.candidates)
 	m.completion.visible = true
-	m.completion.candidates = cands
+	m.completion.candidates = ctx.candidates
 
-	if !wasVisible || prevLen != len(cands) {
+	if !wasVisible || prevLen != len(ctx.candidates) {
 		m.applyLayout()
 		if !wasVisible {
 			m.viewport.GotoBottom()

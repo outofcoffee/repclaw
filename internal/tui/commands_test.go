@@ -851,3 +851,121 @@ func TestTabCompletion_NoCandidatesIsNoOp(t *testing.T) {
 		t.Errorf("expected textarea unchanged, got %q", got)
 	}
 }
+
+func TestAgentTabCompletion_LCPExtendsMultiCandidate(t *testing.T) {
+	m := newSlashTabTestModel()
+	m.agentNames = []string{"main", "mail"}
+	m.textarea.SetValue("/agent ma")
+	m.textarea.CursorEnd()
+
+	updated, _ := m.Update(tabKey())
+	if got := updated.textarea.Value(); got != "/agent mai" {
+		t.Errorf("after Tab: got %q, want %q", got, "/agent mai")
+	}
+	if updated.completion.cycling {
+		t.Error("expected cycling=false after LCP extension")
+	}
+}
+
+func TestAgentTabCompletion_FullOnSingleCandidate(t *testing.T) {
+	m := newSlashTabTestModel()
+	m.agentNames = []string{"alpha", "beta"}
+	m.textarea.SetValue("/agent al")
+	m.textarea.CursorEnd()
+
+	updated, _ := m.Update(tabKey())
+	if got := updated.textarea.Value(); got != "/agent alpha" {
+		t.Errorf("after Tab: got %q, want %q", got, "/agent alpha")
+	}
+}
+
+func TestAgentTabCompletion_CycleAtLCP(t *testing.T) {
+	m := newSlashTabTestModel()
+	m.agentNames = []string{"main", "mail"}
+	m.textarea.SetValue("/agent mai")
+	m.textarea.CursorEnd()
+
+	// First Tab from LCP enters cycle, picks first.
+	updated, _ := m.Update(tabKey())
+	if got := updated.textarea.Value(); got != "/agent main" {
+		t.Fatalf("Tab #1: got %q, want %q", got, "/agent main")
+	}
+	// Second Tab advances cycle.
+	updated, _ = updated.Update(tabKey())
+	if got := updated.textarea.Value(); got != "/agent mail" {
+		t.Fatalf("Tab #2: got %q, want %q", got, "/agent mail")
+	}
+	// Third Tab wraps.
+	updated, _ = updated.Update(tabKey())
+	if got := updated.textarea.Value(); got != "/agent main" {
+		t.Fatalf("Tab #3 (wrap): got %q, want %q", got, "/agent main")
+	}
+}
+
+func TestAgentTabCompletion_ShiftTabCyclesBack(t *testing.T) {
+	m := newSlashTabTestModel()
+	m.agentNames = []string{"main", "mail"}
+	m.textarea.SetValue("/agent mai")
+	m.textarea.CursorEnd()
+
+	updated, _ := m.Update(tabKey())
+	if got := updated.textarea.Value(); got != "/agent main" {
+		t.Fatalf("Tab: got %q, want %q", got, "/agent main")
+	}
+	updated, _ = updated.Update(shiftTabKey())
+	if got := updated.textarea.Value(); got != "/agent mail" {
+		t.Errorf("Shift+Tab from index 0 should wrap, got %q", got)
+	}
+}
+
+func TestAgentTabCompletion_PreservesOriginalCasing(t *testing.T) {
+	m := newSlashTabTestModel()
+	m.agentNames = []string{"Alpha", "Beta", "Gamma Two"}
+	m.textarea.SetValue("/agent be")
+	m.textarea.CursorEnd()
+
+	// Single match — full completion preserves original casing.
+	updated, _ := m.Update(tabKey())
+	if got := updated.textarea.Value(); got != "/agent Beta" {
+		t.Errorf("expected original casing preserved, got %q", got)
+	}
+}
+
+func TestAgentTabCompletion_MenuVisibleWhileTyping(t *testing.T) {
+	m := newSlashTabTestModel()
+	m.agentNames = []string{"main", "mail"}
+	m.textarea.SetValue("/agent ma")
+	m.textarea.CursorEnd()
+
+	// A keypress that leaves the textarea in the agent-arg context
+	// should populate the menu via refreshCompletionMenu.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	if !updated.completion.visible {
+		t.Fatalf("expected menu visible at /agent mai, got value=%q visible=%v", updated.textarea.Value(), updated.completion.visible)
+	}
+	if len(updated.completion.candidates) != 2 {
+		t.Errorf("expected 2 candidates, got %d: %v", len(updated.completion.candidates), updated.completion.candidates)
+	}
+}
+
+func TestLongestCommonPrefixFold(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"empty", nil, ""},
+		{"single preserves casing", []string{"Beta"}, "Beta"},
+		{"mixed case converges", []string{"Beta", "Beach"}, "Be"},
+		{"diverging case", []string{"main", "Mail"}, "mai"},
+		{"first casing wins", []string{"BEta", "beach"}, "BE"},
+		{"no common prefix", []string{"alpha", "Beta"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := longestCommonPrefixFold(tt.in); got != tt.want {
+				t.Errorf("longestCommonPrefixFold(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

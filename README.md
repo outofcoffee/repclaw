@@ -143,7 +143,7 @@ In the config view, use `Space` to toggle checkboxes and `←`/`→` to adjust n
 
 ## Commands
 
-Type these in the chat input. As soon as you type `/`, a menu shows every matching command and skill. Tab extends the input to the longest common prefix; press it again at the prefix to cycle through candidates (Shift+Tab to cycle back). After `/agent ` Tab still completes the agent name inline.
+Type these in the chat input. As soon as you type `/`, a menu shows every matching command and skill. Tab extends the input to the longest common prefix; press it again at the prefix to cycle through candidates (Shift+Tab to cycle back). The same menu and Tab cycling apply to agent names after `/agent `.
 
 | Command | Action |
 |---------|--------|
