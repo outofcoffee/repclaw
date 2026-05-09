@@ -18,6 +18,7 @@ import (
 	"github.com/lucinate-ai/lucinate/internal/backend"
 	"github.com/lucinate-ai/lucinate/internal/client"
 	"github.com/lucinate-ai/lucinate/internal/config"
+	"github.com/lucinate-ai/lucinate/internal/routines"
 )
 
 // textareaCursorByteOffset converts the textarea's (Line, Column) cursor
@@ -167,12 +168,14 @@ type chatModel struct {
 	contextWindow      int // model context capacity for the active session; 0 when unknown
 	skills             []agentSkill
 	agentNames         []string // populated asynchronously by loadAgentNames; powers /agent <TAB> completion
+	routineNames       []string // populated by loadRoutineNames; powers /routine <TAB> completion
 	completion         completionMenuState
 	baseViewportHeight int // viewport height with the completion menu hidden; setSize updates it, applyLayout subtracts the menu's footprint when visible
 	spinnerFrame       int
 	spinnerTicking     bool
 	prefs              config.Preferences
 	pendingConfirm     *pendingConfirmation
+	pendingNavConfirm  *pendingNavConfirm
 	historyLimit       int
 	historyLoading     bool   // true while the initial history fetch is in flight; gates the placeholder in updateViewport
 	thinkingLevel      string // current thinking level; "" means not set / using gateway default
@@ -181,6 +184,7 @@ type chatModel struct {
 	transcript         bool   // true when the model is rendering a cron run-log transcript: read-only, esc returns to the cron detail view that opened it
 	terminalFocused    bool   // tracks tea.FocusMsg/BlurMsg so the completion bell only rings when the user is looking elsewhere
 	updateLatest       string // populated by AppModel when the startup check finds a newer release; rendered as a header badge
+	activeRoutine      *activeRoutine
 }
 
 func spinnerTickCmd() tea.Cmd {
@@ -325,6 +329,7 @@ func (m chatModel) Init() tea.Cmd {
 		m.loadContextUsage(),
 		func() tea.Msg { return skillsDiscoveredMsg{skills: discoverSkills()} },
 		m.loadAgentNames(),
+		loadRoutineNames(),
 	)
 }
 
@@ -577,6 +582,15 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		m.agentNames = msg.names
 		return m, nil
 
+	case chatRoutineNamesLoadedMsg:
+		m.routineNames = msg.names
+		return m, nil
+
+	case startRoutineMsg:
+		cmd := m.startRoutine(msg.name)
+		m.updateViewport()
+		return m, cmd
+
 	case skillsDiscoveredMsg:
 		m.skills = msg.skills
 		if len(m.skills) > 0 {
@@ -602,11 +616,32 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		logEvent("KEY code=%d mod=%v string=%q", msg.Code, msg.Mod, msg.String())
 		switch msg.String() {
 		case "esc":
+			if m.pendingNavConfirm != nil {
+				m.pendingNavConfirm = nil
+				m.messages = append(m.messages, chatMessage{role: "system", content: "Cancelled — routine continues."})
+				m.updateViewport()
+				return m, nil
+			}
+			if m.activeRoutine != nil {
+				var cmd tea.Cmd
+				if m.sending {
+					cmd = m.cancelTurn()
+				}
+				m.endRoutine("cancelled")
+				m.updateViewport()
+				return m, cmd
+			}
 			if m.sending {
 				return m, m.cancelTurn()
 			}
 			if m.transcript {
 				return m, func() tea.Msg { return goBackFromCronTranscriptMsg{} }
+			}
+			return m, nil
+		case "alt+m":
+			if m.activeRoutine != nil {
+				m.cycleRoutineMode()
+				m.updateViewport()
 			}
 			return m, nil
 		case "tab":
@@ -644,6 +679,47 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		case "enter":
 			text := strings.TrimSpace(m.textarea.Value())
 			if text == "" {
+				// Empty Enter advances the active routine when manual or paused
+				// and idle. Keeps the gesture out of the way of the textarea's
+				// regular newline handling (alt+enter), which fires before this
+				// branch only when there is content.
+				if ar := m.activeRoutine; ar != nil && !m.sending {
+					if (ar.mode == routines.ModeManual || ar.paused) && ar.sent < len(ar.routine.Steps) {
+						return m, m.sendNextRoutineStep()
+					}
+				}
+				return m, nil
+			}
+
+			// Resolve a pending routine-cancel-on-navigation prompt. Done
+			// before the generic pendingConfirm path because the nav
+			// gate must end the routine synchronously so the log file
+			// is closed before the chatModel is potentially replaced.
+			if m.pendingNavConfirm != nil {
+				m.textarea.Reset()
+				m.refreshCompletionMenu()
+				confirm := m.pendingNavConfirm
+				m.pendingNavConfirm = nil
+				lower := strings.ToLower(text)
+				if lower == "y" || lower == "yes" {
+					var cmds []tea.Cmd
+					// Abort any in-flight turn the routine kicked off so a
+					// follow-up startRoutineMsg (the /routine <name> path)
+					// finds a clean controller and m.sending == false.
+					if m.sending {
+						if cmd := m.cancelTurn(); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					}
+					m.endRoutine("cancelled")
+					if confirm.nav != nil {
+						cmds = append(cmds, confirm.nav)
+					}
+					m.updateViewport()
+					return m, tea.Batch(cmds...)
+				}
+				m.messages = append(m.messages, chatMessage{role: "system", content: "Cancelled — routine continues."})
+				m.updateViewport()
 				return m, nil
 			}
 
@@ -727,6 +803,9 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			m.messages = append(m.messages, chatMessage{role: "user", content: text})
 			m.messages = append(m.messages, chatMessage{role: "assistant", streaming: true, awaitingDelta: true})
 			m.sending = true
+			if ar := m.activeRoutine; ar != nil && ar.logger != nil {
+				ar.logger.WriteUser(text)
+			}
 			m.updateViewport()
 			cmds = append(cmds, m.sendMessage(sent), m.ensureSpinnerTicking())
 			return m, tea.Batch(cmds...)
@@ -965,6 +1044,9 @@ func (m *chatModel) drainQueueOpt(refresh bool) tea.Cmd {
 	}
 	m.messages = append(m.messages, chatMessage{role: "user", content: text})
 	m.messages = append(m.messages, chatMessage{role: "assistant", streaming: true, awaitingDelta: true})
+	if ar := m.activeRoutine; ar != nil && ar.logger != nil {
+		ar.logger.WriteUser(text)
+	}
 	m.updateViewport()
 	return tea.Batch(m.sendMessage(sent), m.ensureSpinnerTicking())
 }
@@ -1097,6 +1179,9 @@ func (m chatModel) View() string {
 		if suffix == "" {
 			token, suffix = m.agentNameHint(value, cursorByte)
 		}
+		if suffix == "" {
+			token, suffix = m.routineNameHint(value, cursorByte)
+		}
 		if suffix != "" {
 			help = helpStyle.Render(fmt.Sprintf(" %s%s — tab to complete", token, suffix))
 		} else if m.hideInput {
@@ -1110,13 +1195,18 @@ func (m chatModel) View() string {
 		}
 	}
 
+	routineStatus := ""
+	if line := m.routineStatusLine(); line != "" {
+		routineStatus = routineStatusStyle.Width(m.width).Render(line)
+	}
+
 	if m.hideInput {
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			header,
-			m.viewport.View(),
-			help,
-		)
+		parts := []string{header, m.viewport.View()}
+		if routineStatus != "" {
+			parts = append(parts, routineStatus)
+		}
+		parts = append(parts, help)
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
 	input := borderStyle.
@@ -1126,6 +1216,9 @@ func (m chatModel) View() string {
 	parts := []string{header, m.viewport.View()}
 	if menu != "" {
 		parts = append(parts, menu)
+	}
+	if routineStatus != "" {
+		parts = append(parts, routineStatus)
 	}
 	parts = append(parts, input, help)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)

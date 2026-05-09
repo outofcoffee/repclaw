@@ -200,12 +200,14 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		logEvent("  FINAL msgContent=%s", string(chatEv.Message))
 		m.runID = ""
 		finalised := false
+		assistantContent := ""
 		if len(m.messages) > 0 {
 			last := &m.messages[len(m.messages)-1]
 			if last.role == "assistant" && last.streaming && !last.awaitingDelta {
 				last.streaming = false
 				last.thinking = extractThinkingFromMessage(chatEv.Message)
 				finalised = true
+				assistantContent = last.content
 				logEvent("  FINALISED — refreshing history thinking_len=%d", len(last.thinking))
 			}
 		}
@@ -214,6 +216,15 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			// Empty ack from gateway — the real response hasn't arrived yet.
 			logEvent("  FINAL ignored (no streaming assistant message)")
 			return nil
+		}
+		// Routine bookkeeping: log assistant content, parse /routine: directives.
+		// Done before drainQueue so a directive (stop/pause/mode) is honoured
+		// before the next routine step would otherwise auto-fire.
+		if m.activeRoutine != nil {
+			if m.activeRoutine.logger != nil && assistantContent != "" {
+				m.activeRoutine.logger.WriteAssistant(assistantContent)
+			}
+			m.applyDirectives(assistantContent)
 		}
 		var cmds []tea.Cmd
 		if m.shouldRingBell() {
@@ -224,6 +235,12 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			// Still draining the queue — defer history refresh until the queue is empty
 			// to avoid replacing m.messages while queued user messages are visible.
 			cmds = append(cmds, drainCmd)
+			return tea.Batch(cmds...)
+		}
+		// User queue empty — try advancing the active routine. The advance itself
+		// sets m.sending and dispatches the next step.
+		if cmd := m.maybeAdvanceRoutine(); cmd != nil {
+			cmds = append(cmds, cmd)
 			return tea.Batch(cmds...)
 		}
 		cmds = append(cmds, m.refreshHistory(), m.loadStats())
@@ -245,6 +262,11 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		if !finalised {
 			return nil
 		}
+		// Pause the routine so a transient error doesn't auto-loop the next
+		// step. The user can press Enter to retry / continue, or Esc to end.
+		if m.activeRoutine != nil {
+			m.activeRoutine.paused = true
+		}
 		return m.drainQueue()
 
 	case "aborted":
@@ -262,6 +284,9 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		m.updateViewport()
 		if !finalised {
 			return nil
+		}
+		if m.activeRoutine != nil {
+			m.activeRoutine.paused = true
 		}
 		return m.drainQueue()
 	}
