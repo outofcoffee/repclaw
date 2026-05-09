@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/a3tai/openclaw-go/protocol"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func newTestCronsModel(t *testing.T) (cronsModel, *fakeBackend) {
@@ -206,8 +207,13 @@ func TestCronsForm_BuildsCronAddParams(t *testing.T) {
 	if params.Schedule.Kind != "cron" || params.Schedule.Expr != "0 9 * * *" || params.Schedule.Tz != "Europe/London" {
 		t.Errorf("Schedule: %+v", params.Schedule)
 	}
-	if params.Payload.Kind != "agentTurn" || params.Payload.Text != "Please generate today's report." {
+	if params.Payload.Kind != "agentTurn" || params.Payload.Message != "Please generate today's report." {
 		t.Errorf("Payload: %+v", params.Payload)
+	}
+	// agentTurn schemas reject `text` (additionalProperties=false), so the
+	// prompt must travel as `message` and `text` must remain empty.
+	if params.Payload.Text != "" {
+		t.Errorf("Payload.Text should be empty for agentTurn, got %q", params.Payload.Text)
 	}
 	if params.Payload.Model != "claude-opus-4-7" {
 		t.Errorf("Payload.Model: %q", params.Payload.Model)
@@ -484,6 +490,96 @@ func TestCronsDuplicate_EscFromFormReturnsToList(t *testing.T) {
 	m, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.subset != cronSubList {
 		t.Errorf("expected esc from duplicate form to return to list, got %v", m.subset)
+	}
+}
+
+func TestCronsForm_AgentTurnPayloadUsesMessageNotText(t *testing.T) {
+	// Regression: agentTurn schema requires `message` and rejects `text`
+	// (additionalProperties=false). buildAddParams and buildJobPatchMap
+	// must put the prompt in message.
+	f := newCreateForm()
+	f.name.SetValue("Daily report")
+	f.cronExpr.SetValue("0 9 * * *")
+	f.payloadText.SetValue("Generate today's report.")
+
+	params := buildAddParams(f)
+	if params.Payload.Message != "Generate today's report." {
+		t.Errorf("CronAdd Payload.Message: got %q, want %q",
+			params.Payload.Message, "Generate today's report.")
+	}
+	if params.Payload.Text != "" {
+		t.Errorf("CronAdd Payload.Text should be empty for agentTurn, got %q",
+			params.Payload.Text)
+	}
+
+	f.editingID = "job-1"
+	f.mode = "edit"
+	patch := buildJobPatchMap(f)
+	payload := patch["payload"].(map[string]any)
+	if payload["message"] != "Generate today's report." {
+		t.Errorf("patch payload.message: got %#v", payload["message"])
+	}
+	if _, present := payload["text"]; present {
+		t.Errorf("patch payload should not include `text` for agentTurn, got %#v", payload)
+	}
+}
+
+func TestCronsForm_PrePopulatesFromMessageField(t *testing.T) {
+	// Jobs created via gateway/CLI carry the agentTurn prompt in
+	// Payload.Message — the form must pick that up so duplicate/edit
+	// don't show an empty payload field.
+	job := protocol.CronJob{
+		ID:            "job-1",
+		Name:          "Daily",
+		AgentID:       "agent-1",
+		Enabled:       true,
+		SessionTarget: "isolated",
+		WakeMode:      "now",
+		Schedule:      protocol.CronSchedule{Kind: "cron", Expr: "0 9 * * *"},
+		Payload:       protocol.CronPayload{Kind: "agentTurn", Message: "from gateway"},
+	}
+	form, _ := newDuplicateForm(job)
+	if got := form.payloadText.Value(); got != "from gateway" {
+		t.Errorf("payloadText: got %q, want %q", got, "from gateway")
+	}
+}
+
+func TestCronsForm_RefusesEmptyPayload(t *testing.T) {
+	m, fake := newTestCronsModel(t)
+	m, _ = m.Update(cronsLoadedMsg{jobs: sampleJobs()})
+	m, _ = m.handleListKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m.form.payloadText.SetValue("")
+
+	m, cmd := m.submitForm()
+	if cmd != nil {
+		t.Fatal("expected submit to be refused with empty payload")
+	}
+	if m.form.err == nil || !strings.Contains(m.form.err.Error(), "payload") {
+		t.Errorf("expected payload-required error, got %v", m.form.err)
+	}
+	if fake.lastCronAdd != nil {
+		t.Errorf("CronAdd should not have been invoked, got %+v", fake.lastCronAdd)
+	}
+}
+
+func TestRenderErrorLine_WrapsLongMessage(t *testing.T) {
+	long := "cron.add: INVALID_REQUEST: invalid cron.add params: at /payload: must have required property 'text'; at /payload/kind: must be equal to constant"
+	out := renderErrorLine(long, 60)
+	for _, line := range strings.Split(out, "\n") {
+		stripped := ansi.Strip(line)
+		if len(stripped) > 60 {
+			t.Errorf("line exceeded width 60 (len=%d): %q", len(stripped), stripped)
+		}
+	}
+	if !strings.Contains(out, "Error:") {
+		t.Errorf("expected Error: prefix, got %q", out)
+	}
+}
+
+func TestRenderErrorLine_ZeroWidthPassesThrough(t *testing.T) {
+	out := renderErrorLine("boom", 0)
+	if !strings.Contains(out, "Error: boom") {
+		t.Errorf("expected unwrapped output to contain 'Error: boom', got %q", out)
 	}
 }
 

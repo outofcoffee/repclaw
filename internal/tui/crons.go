@@ -851,11 +851,14 @@ func hasTranscriptContent(job protocol.CronJob, runs []protocol.CronRunLogEntry)
 
 // cronPayloadText returns the human-authored prompt for an agentTurn
 // cron job, falling back across the union fields the gateway uses.
+// Message is the canonical field for agentTurn; Text remains as a
+// fallback for historical jobs (and is the canonical field for the
+// systemEvent kind, which the form does not surface).
 func cronPayloadText(job protocol.CronJob) string {
-	if t := strings.TrimSpace(job.Payload.Text); t != "" {
-		return t
+	if m := strings.TrimSpace(job.Payload.Message); m != "" {
+		return m
 	}
-	return strings.TrimSpace(job.Payload.Message)
+	return strings.TrimSpace(job.Payload.Text)
 }
 
 // -----------------------------------------------------------------------------
@@ -940,9 +943,13 @@ func populateFormFromJob(job protocol.CronJob) (cronForm, string) {
 	f.timezone.SetValue(job.Schedule.Tz)
 	f.agentID.SetValue(job.AgentID)
 	f.model.SetValue(job.Payload.Model)
-	f.payloadText.SetValue(job.Payload.Text)
+	// Prefer Message because it is the canonical agentTurn prompt field
+	// (the gateway schema only accepts `message` for that kind). Text is
+	// left as a fallback for any historical jobs that still carry the
+	// prompt in the systemEvent-style `text` field.
+	f.payloadText.SetValue(job.Payload.Message)
 	if f.payloadText.Value() == "" {
-		f.payloadText.SetValue(job.Payload.Message)
+		f.payloadText.SetValue(job.Payload.Text)
 	}
 	if job.SessionTarget != "" {
 		f.sessionTarget = job.SessionTarget
@@ -1117,6 +1124,10 @@ func (m cronsModel) submitForm() (cronsModel, tea.Cmd) {
 		m.form.err = fmt.Errorf("cron expression is required")
 		return m, nil
 	}
+	if m.form.payloadText.Value() == "" {
+		m.form.err = fmt.Errorf("payload text is required")
+		return m, nil
+	}
 	m.form.err = nil
 	m.form.saving = true
 	cron := m.cron
@@ -1150,9 +1161,13 @@ func buildAddParams(f cronForm) protocol.CronAddParams {
 			Tz:   f.timezone.Value(),
 		},
 		Payload: protocol.CronPayload{
-			Kind:  "agentTurn",
-			Text:  f.payloadText.Value(),
-			Model: f.model.Value(),
+			Kind: "agentTurn",
+			// agentTurn carries the prompt in `message`. The schema's
+			// `additionalProperties: false` rejects `text` (which is the
+			// systemEvent payload's prompt field), so use the wire-correct
+			// field for this kind.
+			Message: f.payloadText.Value(),
+			Model:   f.model.Value(),
 		},
 		Delivery: buildDelivery(f),
 	}
@@ -1182,9 +1197,11 @@ func buildJobPatchMap(f cronForm) map[string]any {
 			"tz":   f.timezone.Value(),
 		},
 		"payload": map[string]any{
-			"kind":  "agentTurn",
-			"text":  f.payloadText.Value(),
-			"model": f.model.Value(),
+			"kind": "agentTurn",
+			// See buildAddParams for the kind/field-name rationale: agentTurn
+			// schemas reject `text` outright, so we send `message`.
+			"message": f.payloadText.Value(),
+			"model":   f.model.Value(),
 		},
 		"agentId": f.agentID.Value(),
 		"enabled": f.enabled,
@@ -1251,7 +1268,7 @@ func (m cronsModel) viewList() string {
 	if m.err != nil {
 		var b strings.Builder
 		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(fmt.Sprintf("  Error: %v", m.err)))
+		b.WriteString(renderErrorLine(m.err.Error(), m.width))
 		b.WriteString("\n\n")
 		b.WriteString(hints)
 		b.WriteString("\n")
@@ -1327,10 +1344,7 @@ func (m cronsModel) viewDetail() string {
 	}
 	b.WriteString("\n")
 	b.WriteString("  Payload:\n")
-	payload := job.Payload.Text
-	if payload == "" {
-		payload = job.Payload.Message
-	}
+	payload := cronPayloadText(job)
 	if payload == "" {
 		payload = "—"
 	}
@@ -1345,7 +1359,7 @@ func (m cronsModel) viewDetail() string {
 	case m.runsLoading:
 		b.WriteString("  Loading...\n")
 	case m.runsErr != nil:
-		b.WriteString(errorStyle.Render(fmt.Sprintf("  Error: %v", m.runsErr)))
+		b.WriteString(renderErrorLine(m.runsErr.Error(), m.width))
 		b.WriteString("\n")
 	case len(m.runs) == 0:
 		b.WriteString("  No run log entries yet.\n")
@@ -1372,7 +1386,8 @@ func (m cronsModel) viewForm() string {
 	b.WriteString("\n\n")
 
 	if m.form.unsupported != "" {
-		b.WriteString(errorStyle.Render("  " + m.form.unsupported))
+		wrapped := wordWrap("  "+m.form.unsupported, m.width)
+		b.WriteString(errorStyle.Render(indentMultiline(wrapped, "  ")))
 		b.WriteString("\n\n")
 	}
 
@@ -1404,7 +1419,7 @@ func (m cronsModel) viewForm() string {
 	}
 
 	if m.form.err != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("  Error: %v", m.form.err)))
+		b.WriteString(renderErrorLine(m.form.err.Error(), m.width))
 		b.WriteString("\n\n")
 	}
 	if m.form.saving {
