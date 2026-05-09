@@ -31,7 +31,7 @@ jobs:
 
       - name: Mint Homebrew tap token
         id: tap-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.HOMEBREW_TAP_APP_ID }}
           private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
@@ -54,7 +54,7 @@ jobs:
       - name: Mint website dispatch token
         id: website-token
         if: ${{ !contains(github.ref_name, '-') }}
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.WEBSITE_DISPATCH_APP_ID }}
           private-key: ${{ secrets.WEBSITE_DISPATCH_APP_PRIVATE_KEY }}
