@@ -80,7 +80,9 @@ The chat layer passes the active skill catalog through `ChatSendParams.Skills`. 
 
 ## Compaction
 
-`/compact` runs locally — there is no gateway-side compactor, so `SessionCompact` issues a non-streaming `POST /v1/chat/completions` against the agent's configured model with a summarisation prompt and the older portion of the transcript as context. The model's reply is written back to `history.jsonl` as a single `role: "system"` message with `Summary: true`, followed by the most recent `compactKeepTail` messages preserved verbatim. `compactMinHistory` gates the no-op-when-too-small case (returns success without a network round-trip).
+`/compact` runs locally — there is no gateway-side compactor, so `SessionCompact` issues a streaming `POST /v1/chat/completions` against the agent's configured model with a summarisation prompt and the older portion of the transcript as context. Deltas are accumulated into a string without touching the events channel, so the compaction is invisible to the chat view. The accumulated text is written back to `history.jsonl` as a single `role: "system"` message with `Summary: true`, followed by the most recent `compactKeepTail` messages preserved verbatim. `compactMinHistory` gates the no-op-when-too-small case (returns success without a network round-trip).
+
+Streaming (rather than non-streaming) is intentional: some Ollama setups, particularly with reasoning-capable models, return an empty `message.content` on the non-streaming path while the streamed `delta.content` deltas produce the actual answer. Reusing the streaming code path means /compact works across the same compatibility matrix the regular chat send already covers.
 
 The `Summary` flag is what distinguishes a compact-produced digest from the legacy "skip stored system messages" defence in `runStream`: messages with `Summary: true` are forwarded on every turn after compaction, while any other `role: "system"` line in `history.jsonl` is still ignored. `ChatHistory` mirrors the same rule so the digest renders in the chat view rather than vanishing on history refresh.
 

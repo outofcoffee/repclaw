@@ -664,11 +664,11 @@ func TestBackend_SessionCompact_NoOpWhenHistoryShort(t *testing.T) {
 }
 
 // TestBackend_SessionCompact_SummarisesAndPreservesTail covers the
-// happy path: with enough history the backend issues a non-streaming
-// completion, swaps the older messages for a single Summary system
-// entry, and keeps the most recent compactKeepTail messages verbatim.
-// The test also asserts the persisted summary has Summary=true so
-// runStream forwards it on the next turn.
+// happy path: with enough history the backend streams a completion,
+// swaps the older messages for a single Summary system entry, and
+// keeps the most recent compactKeepTail messages verbatim. The test
+// also asserts the persisted summary has Summary=true so runStream
+// forwards it on the next turn.
 func TestBackend_SessionCompact_SummarisesAndPreservesTail(t *testing.T) {
 	var captured chatRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -677,8 +677,18 @@ func TestBackend_SessionCompact_SummarisesAndPreservesTail(t *testing.T) {
 			return
 		}
 		_ = json.NewDecoder(r.Body).Decode(&captured)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"User asked about colours; assistant explained the rainbow."}}]}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		writeChunk := func(content string) {
+			payload := fmt.Sprintf(`{"choices":[{"delta":{"content":%q}}]}`, content)
+			fmt.Fprintf(w, "data: %s\n\n", payload)
+			flusher.Flush()
+		}
+		writeChunk("User asked about colours; ")
+		writeChunk("assistant explained the rainbow.")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
 	}))
 	defer srv.Close()
 
@@ -698,8 +708,8 @@ func TestBackend_SessionCompact_SummarisesAndPreservesTail(t *testing.T) {
 		t.Fatalf("SessionCompact: %v", err)
 	}
 
-	if captured.Stream {
-		t.Errorf("compact request should be non-streaming")
+	if !captured.Stream {
+		t.Errorf("compact request should stream — non-streaming returns empty content on some Ollama setups")
 	}
 	if captured.Model != "m" {
 		t.Errorf("compact used wrong model: %q", captured.Model)
@@ -752,24 +762,31 @@ func TestBackend_SessionCompact_SummarisesAndPreservesTail(t *testing.T) {
 // /compact, a follow-up ChatSend should forward the summary system
 // message and the preserved tail, but none of the older raw turns.
 func TestBackend_SessionCompact_ForwardsSummaryOnNextTurn(t *testing.T) {
-	var lastBody chatRequest
+	var compactBody, chatBody chatRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/chat/completions" {
-			_ = json.NewDecoder(r.Body).Decode(&lastBody)
-			if !lastBody.Stream {
-				// Compaction call — non-streaming JSON.
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"earlier-summary-text"}}]}`)
-				return
-			}
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.WriteHeader(http.StatusOK)
-			flusher, _ := w.(http.Flusher)
-			fmt.Fprint(w, "data: [DONE]\n\n")
-			flusher.Flush()
+		if r.URL.Path != "/v1/chat/completions" {
+			http.Error(w, "wrong path", http.StatusNotFound)
 			return
 		}
-		http.Error(w, "wrong path", http.StatusNotFound)
+		var body chatRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		// Compaction request is the one carrying the compaction system
+		// prompt; the regular chat send doesn't.
+		isCompact := len(body.Messages) > 0 && strings.Contains(body.Messages[0].Content, "compacting")
+		if isCompact {
+			compactBody = body
+		} else {
+			chatBody = body
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		if isCompact {
+			fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"earlier-summary-text"}}]}`+"\n\n")
+			flusher.Flush()
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
 	}))
 	defer srv.Close()
 
@@ -795,8 +812,14 @@ func TestBackend_SessionCompact_ForwardsSummaryOnNextTurn(t *testing.T) {
 		t.Fatal("timed out waiting for stream completion")
 	}
 
+	if len(compactBody.Messages) == 0 {
+		t.Fatal("compaction request never observed")
+	}
+	if len(chatBody.Messages) == 0 {
+		t.Fatal("chat-send request never observed")
+	}
 	var sawSummary, leakedOld bool
-	for _, m := range lastBody.Messages {
+	for _, m := range chatBody.Messages {
 		if m.Role == "system" && strings.Contains(m.Content, "earlier-summary-text") {
 			sawSummary = true
 		}
@@ -805,10 +828,10 @@ func TestBackend_SessionCompact_ForwardsSummaryOnNextTurn(t *testing.T) {
 		}
 	}
 	if !sawSummary {
-		t.Errorf("expected the summary system message to be forwarded on the next turn, got: %+v", lastBody.Messages)
+		t.Errorf("expected the summary system message to be forwarded on the next turn, got: %+v", chatBody.Messages)
 	}
 	if leakedOld {
-		t.Errorf("older raw turns leaked into the next request — compact did not actually shrink history: %+v", lastBody.Messages)
+		t.Errorf("older raw turns leaked into the next request — compact did not actually shrink history: %+v", chatBody.Messages)
 	}
 }
 
@@ -844,11 +867,16 @@ func TestBackend_SessionCompact_RequiresModel(t *testing.T) {
 }
 
 // TestBackend_SessionCompact_EmptySummaryRejected ensures a model that
-// returns whitespace doesn't silently wipe history. The original
+// streams only whitespace doesn't silently wipe history. The original
 // transcript is left untouched and the error surfaces back to the TUI.
 func TestBackend_SessionCompact_EmptySummaryRejected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"   "}}]}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"   "}}]}`+"\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
 	}))
 	defer srv.Close()
 

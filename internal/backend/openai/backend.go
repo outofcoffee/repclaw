@@ -571,13 +571,22 @@ func (b *Backend) SessionCompact(ctx context.Context, sessionKey string) error {
 	return b.store.RewriteHistory(sessionKey, rewritten)
 }
 
-// summarise issues a non-streaming /v1/chat/completions request with
-// the compaction prompt and returns the assistant's reply text. The
-// older transcript is forwarded verbatim — including any prior summary
-// produced by an earlier /compact, so the new digest folds the old one
-// in rather than dropping it.
+// summarise issues a /v1/chat/completions request with the compaction
+// prompt and returns the assistant's reply text. The older transcript
+// is forwarded verbatim — including any prior summary produced by an
+// earlier /compact, so the new digest folds the old one in rather
+// than dropping it.
+//
+// Streaming is used here for the same reason it's used for regular
+// chat sends: some OpenAI-compatible servers (notably Ollama with
+// reasoning-capable models) return an empty `message.content` on the
+// non-streaming path while the streamed `delta.content` deltas
+// produce the actual answer. Accumulating deltas is the well-trodden
+// path that works across the whole compatibility matrix; the events
+// channel is intentionally not touched so /compact stays invisible
+// in the chat transcript.
 func (b *Backend) summarise(ctx context.Context, model string, older []Message) (string, error) {
-	body := chatRequest{Model: model, Stream: false}
+	body := chatRequest{Model: model, Stream: true}
 	body.Messages = append(body.Messages, chatRequestMessage{Role: "system", Content: compactSystemPrompt})
 	for _, msg := range older {
 		// Forward earlier summaries (Role=="system" && Summary) so the
@@ -594,6 +603,7 @@ func (b *Backend) summarise(ctx context.Context, model string, older []Message) 
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Accept", "text/event-stream")
 	resp, err := b.http.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("compact: %w", err)
@@ -607,14 +617,25 @@ func (b *Backend) summarise(ctx context.Context, model string, older []Message) 
 		return "", fmt.Errorf("compact: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 
-	var decoded chatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return "", fmt.Errorf("compact: decode response: %w", err)
+	var summary strings.Builder
+	scanErr := httpcommon.ScanSSE(resp.Body, func(payload string) bool {
+		if payload == "[DONE]" {
+			return true
+		}
+		var ev streamChunk
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			return false
+		}
+		if len(ev.Choices) == 0 {
+			return false
+		}
+		summary.WriteString(ev.Choices[0].Delta.Content)
+		return false
+	})
+	if scanErr != nil {
+		return "", fmt.Errorf("compact: %w", scanErr)
 	}
-	if len(decoded.Choices) == 0 {
-		return "", fmt.Errorf("compact: model returned no choices")
-	}
-	return decoded.Choices[0].Message.Content, nil
+	return summary.String(), nil
 }
 
 // --- APIKeyAuth ---
@@ -661,17 +682,6 @@ type streamChunk struct {
 		Delta struct {
 			Content string `json:"content"`
 		} `json:"delta"`
-	} `json:"choices"`
-}
-
-// chatCompletionResponse mirrors the non-streaming /v1/chat/completions
-// reply (subset). Used by SessionCompact's summarisation pass.
-type chatCompletionResponse struct {
-	Choices []struct {
-		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"message"`
 	} `json:"choices"`
 }
 
