@@ -257,6 +257,23 @@ func wordWrap(s string, width int) string {
 	return b.String()
 }
 
+// renderErrorLine formats an error message as a single styled paragraph
+// that wraps cleanly within the given viewport width. The "  Error: "
+// prefix is included and continuation lines are indented to match, so
+// long gateway error strings (like the JSON-schema validator's
+// multi-clause messages) don't run off the side of the terminal.
+//
+// Pass width=0 to disable wrapping (useful when the caller doesn't have
+// a width to hand, e.g. in fixed-width contexts).
+func renderErrorLine(msg string, width int) string {
+	const prefix = "  Error: "
+	body := prefix + msg
+	if width > 0 {
+		body = indentMultiline(wordWrap(body, width), "  ")
+	}
+	return errorStyle.Render(body)
+}
+
 // indentMultiline indents every line after the first by the given prefix.
 func indentMultiline(s, indent string) string {
 	if indent == "" || !strings.Contains(s, "\n") {

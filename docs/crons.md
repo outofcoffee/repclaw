@@ -89,6 +89,10 @@ Tab/Shift+Tab navigates fields. Space toggles the cycle/checkbox controls (`sess
 
 The toggle action (`t` on detail) and the create-form submit use the typed `protocol.CronUpdateParams`/`CronAddParams`. The **edit-form submit goes through `CronUpdateRaw(jobID, patch map[string]any)` instead**, because every string field on `protocol.CronJobPatch` and `CronPayload` is tagged `json:",omitempty"` — once Go marshals an empty value, the field is dropped from the JSON, and the gateway can't distinguish "user cleared this field" from "user didn't touch this field" (it keeps the prior value). The map-based path emits empty strings verbatim (see `buildJobPatchMap`) so clearing model, description, or delivery actually persists. Toggle stays on the typed path because it only mutates a `*bool`, which doesn't have the omitempty problem.
 
+### Payload field mapping (`message` vs `text`)
+
+`protocol.CronPayload` exposes both `Text` and `Message` because the gateway's payload schema is a union. For `agentTurn` the prompt travels in `message` (the `agentTurn` schema declares `additionalProperties: false` and rejects `text`); for `systemEvent` it travels in `text`. The TUI form models `agentTurn` only, so `buildAddParams` and `buildJobPatchMap` populate `message` and never emit `text`. On the read side, `populateFormFromJob` and `cronPayloadText` prefer `Message` and fall back to `Text` only for historical jobs that may still carry the prompt under the systemEvent-style field.
+
 ## Confirm-delete substate
 
 `x` on detail transitions to a y/n prompt. `y` calls `CronRemove(jobID)` and refreshes the list (returning to `cronSubList`). `n` or `esc` returns to detail without action.
