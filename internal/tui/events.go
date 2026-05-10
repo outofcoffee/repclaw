@@ -57,6 +57,68 @@ func extractTextFromMessage(raw json.RawMessage) string {
 	return backend.ExtractChatText(raw)
 }
 
+// finalisedRunsCap bounds the size of finalisedRunSet. The gateway emits
+// stale duplicates rarely and only within a small window after final, so
+// 32 prior runs is far more than needed in practice — but keeping a hard
+// cap means a long-lived chat with thousands of turns never grows the
+// filter unboundedly.
+const finalisedRunsCap = 32
+
+// finalisedRunSet is a bounded FIFO set of run IDs we have already
+// finalised, used to drop stale chat events the gateway emits after a
+// run has completed. The previous implementation tracked only the most
+// recent finalised run, which was sufficient for the duplicate-after-
+// final case but missed the back-to-back routine race: if a stale event
+// arrives for run N-2 while run N-1 is streaming, it would slip past
+// the single-deep filter (since prevFinalised had moved on to run N-1)
+// and corrupt the placeholder. With a bounded set we cover that window
+// without retaining state across sessions.
+type finalisedRunSet struct {
+	ids   []string        // ordered oldest→newest; len ≤ finalisedRunsCap
+	inSet map[string]bool // O(1) membership for contains()
+}
+
+// add records id as finalised. Empty IDs are ignored (older gateways,
+// non-run-scoped events). Re-adding an existing id is a no-op so the
+// FIFO ordering stays meaningful.
+func (s *finalisedRunSet) add(id string) {
+	if id == "" {
+		return
+	}
+	if s.inSet == nil {
+		s.inSet = make(map[string]bool, finalisedRunsCap)
+	}
+	if s.inSet[id] {
+		return
+	}
+	if len(s.ids) >= finalisedRunsCap {
+		oldest := s.ids[0]
+		s.ids = s.ids[1:]
+		delete(s.inSet, oldest)
+	}
+	s.ids = append(s.ids, id)
+	s.inSet[id] = true
+}
+
+// contains reports whether id has been finalised. Empty IDs are never
+// members so callers can pass chatEv.RunID directly without guarding.
+func (s *finalisedRunSet) contains(id string) bool {
+	if id == "" {
+		return false
+	}
+	return s.inSet[id]
+}
+
+// last returns the most recently added id, or "" when the set is empty.
+// Useful for tests that want to assert "the most recent finalisation
+// was run X" without poking at internals.
+func (s *finalisedRunSet) last() string {
+	if len(s.ids) == 0 {
+		return ""
+	}
+	return s.ids[len(s.ids)-1]
+}
+
 // extractEventSessionKey pulls a top-level "sessionKey" string out of any
 // event payload. Returns "" when the payload has no sessionKey, is empty,
 // or fails to parse — those cases must be allowed through (older gateways,
@@ -166,14 +228,16 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 
 	logEvent("EVENT state=%s runID=%s seq=%d msgLen=%d sessionKey=%s", chatEv.State, chatEv.RunID, chatEv.Seq, len(chatEv.Message), chatEv.SessionKey)
 
-	// Drop stale events from a run we've already finalised. The gateway
-	// occasionally emits a duplicate `delta` (carrying the full content)
-	// after `final` with the same runID; if we let it through, the
-	// stale delta lands on the next routine step's placeholder, flips
-	// awaitingDelta, and lets a subsequent empty final spuriously
-	// finalise the next step — causing back-to-back routine steps to
-	// be advanced without a real response in between.
-	if chatEv.RunID != "" && chatEv.RunID == m.prevFinalisedRunID {
+	// Drop stale events from any run we have already finalised. The
+	// gateway occasionally emits a duplicate `delta` (carrying the full
+	// content) after `final` with the same runID; if we let it through,
+	// the stale delta lands on the next routine step's placeholder,
+	// flips awaitingDelta, and lets a subsequent empty final spuriously
+	// finalise the next step. The set is bounded so the filter covers
+	// back-to-back routine steps where a stale event for run N-k can
+	// arrive while run N is streaming, not just the immediately prior
+	// run.
+	if m.finalisedRuns.contains(chatEv.RunID) {
 		logEvent("  STALE event for finalised run %s — ignored", chatEv.RunID)
 		return nil
 	}
@@ -200,7 +264,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				return nil
 			}
 		}
-		m.messages = append(m.messages, chatMessage{
+		m.appendMessage(chatMessage{
 			role:      "assistant",
 			content:   deltaText,
 			streaming: true,
@@ -220,7 +284,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.thinking = extractThinkingFromMessage(chatEv.Message)
 				finalised = true
 				assistantContent = last.content
-				m.prevFinalisedRunID = chatEv.RunID
+				m.finalisedRuns.add(chatEv.RunID)
 				logEvent("  FINALISED — refreshing history thinking_len=%d", len(last.thinking))
 			}
 		}
@@ -230,6 +294,12 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 			logEvent("  FINAL ignored (no streaming assistant message)")
 			return nil
 		}
+		// Capture the merge boundary *before* bumping so the just-
+		// finalised turn is on the history-side of any refresh issued
+		// from here on; subsequent appends (drained queue, auto-
+		// advanced routine step, recovery system rows) get the new gen
+		// and survive the merge.
+		boundary := m.bumpGen()
 		// Routine bookkeeping: log assistant content, parse /routine: directives.
 		// Done before drainQueue so a directive (stop/pause/mode) is honoured
 		// before the next routine step would otherwise auto-fire.
@@ -243,20 +313,33 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		if m.shouldRingBell() {
 			cmds = append(cmds, bellCmd())
 		}
-		drainCmd := m.drainQueue()
-		if m.sending {
-			// Still draining the queue — defer history refresh until the queue is empty
-			// to avoid replacing m.messages while queued user messages are visible.
-			cmds = append(cmds, drainCmd)
-			return tea.Batch(cmds...)
-		}
-		// User queue empty — try advancing the active routine. The advance itself
-		// sets m.sending and dispatches the next step.
-		if cmd := m.maybeAdvanceRoutine(); cmd != nil {
+		// Always resync canonical history. Layer 2's merge in the
+		// historyRefreshMsg handler keeps the live tail (anything
+		// appended below at gen > boundary) intact, so this is safe
+		// even when a routine is auto-advancing or a queued message
+		// is about to be dispatched. Without this unconditional
+		// resync, mid-routine drift would accumulate over many steps
+		// and could let a stale chat event slip through the gate that
+		// guards spurious step submission.
+		cmds = append(cmds, m.refreshHistoryAt(boundary), m.loadStats())
+		// drainQueueSkipRefresh because we have already queued the
+		// resync above; the queue-empty branch of the regular
+		// drainQueue would otherwise issue a redundant refresh with
+		// the same boundary.
+		if cmd := m.drainQueueSkipRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
-			return tea.Batch(cmds...)
 		}
-		cmds = append(cmds, m.refreshHistory(), m.loadStats())
+		// If the queue was empty, drainQueueSkipRefresh has set
+		// m.sending=false and returned nil. The routine controller
+		// can advance now; it sets m.sending=true and dispatches the
+		// next step. Tagged with the new gen, that step's appended
+		// rows are on the live side of the boundary the refresh is
+		// carrying — the merge will preserve them.
+		if !m.sending {
+			if cmd := m.maybeAdvanceRoutine(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 		return tea.Batch(cmds...)
 
 	case "error":
@@ -269,13 +352,18 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.streaming = false
 				last.errMsg = chatEv.ErrorMessage
 				finalised = true
-				m.prevFinalisedRunID = chatEv.RunID
+				m.finalisedRuns.add(chatEv.RunID)
 			}
 		}
 		m.updateViewport()
 		if !finalised {
 			return nil
 		}
+		// Bump so any subsequent refresh treats the errored turn as
+		// history-side. The error row itself was stamped with the
+		// pre-bump gen (still streaming when we mutated it in place),
+		// so it's on the history-side of the boundary too.
+		m.bumpGen()
 		// Pause the routine so a transient error doesn't auto-loop the next
 		// step. The user can press Enter to retry / continue, or Esc to end.
 		if m.activeRoutine != nil {
@@ -293,13 +381,16 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.streaming = false
 				last.content += "\n[aborted]"
 				finalised = true
-				m.prevFinalisedRunID = chatEv.RunID
+				m.finalisedRuns.add(chatEv.RunID)
 			}
 		}
 		m.updateViewport()
 		if !finalised {
 			return nil
 		}
+		// Same rationale as the error branch — keep the boundary
+		// monotonic so cancelled turns don't pollute the next merge.
+		m.bumpGen()
 		if m.activeRoutine != nil {
 			m.activeRoutine.paused = true
 		}
@@ -375,7 +466,7 @@ func (m *chatModel) handleAgentEvent(ev protocol.Event) tea.Cmd {
 		if name == "" {
 			name = "tool"
 		}
-		m.messages = append(m.messages, chatMessage{
+		m.appendMessage(chatMessage{
 			role:         "tool",
 			toolName:     name,
 			toolCallID:   td.ToolCallID,

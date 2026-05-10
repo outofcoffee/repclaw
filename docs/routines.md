@@ -89,27 +89,32 @@ Step indexing is strictly monotonic: only `sendNextRoutineStep` increments `ar.s
 Auto-advance lives in the `final` case of `handleEvent` (`internal/tui/events.go`). The order matters:
 
 1. Mark the streaming assistant message as finalised (existing behaviour).
-2. If `m.activeRoutine != nil`: log the assistant content (when a logger is configured) and call `applyDirectives` so a `/routine:stop` or `/routine:pause` is honoured before any auto-advance fires.
-3. Drain `m.pendingMessages` — user-typed queue jumps ahead of the routine.
-4. If the queue is empty and `m.sending` is now false, call `maybeAdvanceRoutine()`. If it returns a cmd, dispatch it (sending the next step) and return.
-5. Otherwise fall through to the standard `refreshHistory` + `loadStats` batch.
+2. Capture the merge boundary via `bumpGen()` — the just-finalised turn is now on the history-side of any refresh issued from here on; subsequent appends get the new gen and survive the merge.
+3. If `m.activeRoutine != nil`: log the assistant content (when a logger is configured) and call `applyDirectives` so a `/routine:stop` or `/routine:pause` is honoured before any auto-advance fires.
+4. Always queue `refreshHistoryAt(boundary)` and `loadStats()`. The merge in the `historyRefreshMsg` handler is non-destructive — the live tail of the next routine step (placeholder, in-flight tool card, system rows) survives because those rows carry a higher gen than the boundary.
+5. Drain `m.pendingMessages` via `drainQueueSkipRefresh` — user-typed queue jumps ahead of the routine. The `SkipRefresh` variant is used because we already queued the resync above; `drainQueue`'s built-in empty-queue refresh would otherwise duplicate it.
+6. If the queue was empty and `m.sending` is now false, call `maybeAdvanceRoutine()`. If it returns a cmd, append it to the batch (sending the next step).
 
-`error` and `aborted` set `paused = true` instead of advancing, so a transient gateway error doesn't loop the next step. The user can press Enter (empty input) to retry the next step or Esc to end the routine.
+The unconditional refresh is the heart of the resync architecture. Pre-Layer-3, the refresh was deferred to "queue empty AND no routine to advance", which meant a 10-step auto-mode routine accumulated drift across all 10 steps before the first server-canonical reconciliation. With drift large enough, stale-event filtering became the only line of defence against spurious step submission. Now every `final` reconciles, every step.
+
+`error` and `aborted` also `bumpGen()` so the boundary stays monotonic, and set `paused = true` instead of advancing — so a transient gateway error doesn't loop the next step. The user can press Enter (empty input) to retry the next step or Esc to end the routine. They do not currently issue their own refresh; the next successful turn's refresh covers the canonical reconciliation.
 
 ## Stale-event filtering
 
 The OpenClaw gateway has been observed emitting a duplicate `delta` event with the full content right *after* the matching `final`, on the same `runID`. Without filtering, that delta lands on the next routine step's freshly-appended placeholder, flipping `awaitingDelta` and letting a subsequent empty-content `final` falsely finalise an empty turn — which spuriously auto-advances the routine.
 
-`chatModel.prevFinalisedRunID` tracks the last finalised run; the top of the chat-event branch in `handleEvent` drops any event whose `RunID` matches it:
+`chatModel.finalisedRuns` is a bounded LRU set (cap `finalisedRunsCap = 32`) of run IDs we have already finalised; the top of the chat-event branch in `handleEvent` drops any event whose `RunID` is a member:
 
 ```go
-if chatEv.RunID != "" && chatEv.RunID == m.prevFinalisedRunID {
+if m.finalisedRuns.contains(chatEv.RunID) {
     logEvent("  STALE event for finalised run %s — ignored", chatEv.RunID)
     return nil
 }
 ```
 
-`prevFinalisedRunID` is set inside the `final`, `error`, and `aborted` paths, but only when the corresponding state mutation actually happened (gated on the same `finalised` flag). `TestHandleEvent_StaleDeltaAfterFinalIgnored` covers the bug end-to-end.
+The set is added to inside the `final`, `error`, and `aborted` paths, but only when the corresponding state mutation actually happened (gated on the same `finalised` flag). FIFO eviction keeps a long-lived chat from growing the filter unboundedly.
+
+The set's depth matters: a single-deep filter is enough for the immediate duplicate-after-final case, but back-to-back routine steps open a wider window. A stale event for run N-2 can arrive while run N is streaming; with only the most-recent run remembered, that earlier id slips past and corrupts the live placeholder. `TestHandleEvent_StaleDeltaAfterFinalIgnored` pins the duplicate case; `TestHandleEvent_StaleDeltaFromOlderRunIgnored` pins the back-to-back race; `TestFinalisedRunSet_EvictsOldestPastCap` pins the FIFO bound.
 
 ## Directives
 
@@ -224,7 +229,10 @@ Unit tests:
 - `internal/routines/directives_test.go` — own-line matching, inline-mention rejection, all five directive kinds.
 - `internal/routines/store_test.go` — disk round-trip, invalid-name rejection.
 - `internal/routines/log_test.go` — header + per-message timestamp shape, multi-line bodies, append across reopens, nil-receiver safety.
-- `internal/tui/events_test.go::TestHandleEvent_StaleDeltaAfterFinalIgnored` — pins the duplicate-delta-after-final filter.
+- `internal/tui/events_test.go::TestHandleEvent_StaleDeltaAfterFinalIgnored` / `TestHandleEvent_StaleDeltaFromOlderRunIgnored` / `TestFinalisedRunSet_*` — pin the bounded stale-run filter.
+- `internal/tui/events_test.go::TestHandleEvent_FinalRefreshesEvenWithQueuedMessages` / `TestHandleEvent_FinalRefreshesDuringRoutineAutoAdvance` — pin that the resync fires on every successful `final`, not just at queue/routine end.
+- `internal/tui/events_test.go::TestHandleEvent_FinalBumpsGen` / `TestHandleEvent_FinalEmptyAckDoesNotBumpGen` — pin the gen-bump semantics that anchor the merge boundary.
+- `internal/tui/events_test.go::TestMergeHistoryRefresh_PreservesLiveTail` / `TestMergeHistoryRefresh_NoLiveTail` — pin the merge contract the unconditional refresh depends on.
 - `internal/tui/notifications_test.go` — notify/clear and history-refresh persistence.
 
 Manual smoke:

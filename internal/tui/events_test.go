@@ -7,6 +7,9 @@ import (
 
 	"github.com/a3tai/openclaw-go/protocol"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/lucinate-ai/lucinate/internal/routines"
 )
 
 // makeChatEvent builds a protocol.Event wrapping a ChatEvent payload.
@@ -44,6 +47,9 @@ func makeChatEventWithError(state, runID, errMsg string) protocol.Event {
 }
 
 // newTestChatModel creates a minimal chatModel suitable for unit tests.
+// gen starts at 1 to mirror production (newChatModel) so test rows
+// appended via appendMessage end up on the live side of any boundary
+// computed in tests.
 func newTestChatModel() *chatModel {
 	vp := viewport.New()
 	return &chatModel{
@@ -52,6 +58,7 @@ func newTestChatModel() *chatModel {
 		agentName: "test",
 		width:     80,
 		height:    30,
+		gen:       1,
 	}
 }
 
@@ -193,8 +200,8 @@ func TestHandleEvent_StaleDeltaAfterFinalIgnored(t *testing.T) {
 	finalMsg := json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"3, 9"}]}`)
 	m.handleEvent(makeChatEvent("final", "run1", 5, finalMsg))
 
-	if m.prevFinalisedRunID != "run1" {
-		t.Fatalf("prevFinalisedRunID = %q, want run1", m.prevFinalisedRunID)
+	if !m.finalisedRuns.contains("run1") {
+		t.Fatalf("finalisedRuns should contain run1, got last=%q", m.finalisedRuns.last())
 	}
 
 	// Simulate routine auto-advance: append a fresh placeholder for the
@@ -222,6 +229,338 @@ func TestHandleEvent_StaleDeltaAfterFinalIgnored(t *testing.T) {
 	if !m.messages[len(m.messages)-1].streaming {
 		t.Error("step 2 should still be streaming; empty final must not finalise when no deltas have arrived")
 	}
+}
+
+// TestHandleEvent_StaleDeltaFromOlderRunIgnored covers the back-to-back
+// routine race the bounded set fixes: a stale event for run N-2 arrives
+// while run N is streaming. The previous one-deep prevFinalisedRunID
+// filter only caught duplicates of the *most recent* final, so a stale
+// delta or final for any earlier run would slip through and corrupt
+// the live placeholder. With the LRU, every recent finalised run is
+// remembered.
+func TestHandleEvent_StaleDeltaFromOlderRunIgnored(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+
+	// Walk through three back-to-back routine steps. After each final,
+	// the run's id is added to the set; after the third, the set holds
+	// run1, run2, run3.
+	m.messages = []chatMessage{
+		{role: "user", content: "step 1"},
+		{role: "assistant", content: "reply 1", streaming: true},
+	}
+	m.handleEvent(makeChatEvent("final", "run1", 1, json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"reply 1"}]}`)))
+
+	m.messages = append(m.messages,
+		chatMessage{role: "user", content: "step 2"},
+		chatMessage{role: "assistant", content: "reply 2", streaming: true},
+	)
+	m.handleEvent(makeChatEvent("final", "run2", 1, json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"reply 2"}]}`)))
+
+	m.messages = append(m.messages,
+		chatMessage{role: "user", content: "step 3"},
+		chatMessage{role: "assistant", streaming: true, awaitingDelta: true},
+	)
+
+	// Stale delta from run1 arrives — single-deep filter would let this
+	// through because prevFinalisedRunID has moved on to run2.
+	m.handleEvent(makeChatEvent("delta", "run1", 99, json.RawMessage(`"corrupted"`)))
+
+	last := m.messages[len(m.messages)-1]
+	if last.content != "" {
+		t.Errorf("run1 stale delta must not corrupt run3's placeholder: content = %q", last.content)
+	}
+	if !last.awaitingDelta {
+		t.Error("run1 stale delta must not flip awaitingDelta on run3's placeholder")
+	}
+
+	// Stale final from run2 should also be filtered.
+	m.handleEvent(makeChatEvent("final", "run2", 99, json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"x"}]}`)))
+	if !m.messages[len(m.messages)-1].streaming {
+		t.Error("run2 stale final must not finalise run3's placeholder")
+	}
+}
+
+// TestFinalisedRunSet_EvictsOldestPastCap pins the FIFO eviction so a
+// long-running session doesn't grow the set unboundedly. We add cap+1
+// distinct ids and confirm the very first is no longer a member.
+func TestFinalisedRunSet_EvictsOldestPastCap(t *testing.T) {
+	var s finalisedRunSet
+	for i := 0; i <= finalisedRunsCap; i++ {
+		s.add("r" + itoa(i))
+	}
+	if s.contains("r0") {
+		t.Error("r0 should have been evicted after adding cap+1 ids")
+	}
+	if !s.contains("r" + itoa(finalisedRunsCap)) {
+		t.Error("most recent id must still be a member")
+	}
+	if !s.contains("r1") {
+		t.Error("r1 should still be a member (only r0 evicted)")
+	}
+	if got := s.last(); got != "r"+itoa(finalisedRunsCap) {
+		t.Errorf("last() = %q, want r%d", got, finalisedRunsCap)
+	}
+}
+
+// TestFinalisedRunSet_IgnoresEmpty pins that empty ids are not stored
+// and not reported as members — older gateways may emit events without
+// a runID and those must fall through the filter, not be matched.
+func TestFinalisedRunSet_IgnoresEmpty(t *testing.T) {
+	var s finalisedRunSet
+	s.add("")
+	if s.contains("") {
+		t.Error("empty id must never be a member")
+	}
+	if got := s.last(); got != "" {
+		t.Errorf("last() with empty inputs = %q, want \"\"", got)
+	}
+}
+
+// TestMergeHistoryRefresh_PreservesLiveTail pins the central merge
+// invariant: rows whose gen exceeds the boundary survive a refresh,
+// rows at or below it are replaced by server canonical state. This is
+// the safety net that lets Layer 3 issue refreshes mid-routine without
+// wiping the next step's placeholder.
+func TestMergeHistoryRefresh_PreservesLiveTail(t *testing.T) {
+	m := newTestChatModel()
+	m.gen = 5
+	// Existing local state spans two turns: gen=4 (just finalised) and
+	// gen=5 (next routine step's placeholder + an in-flight tool card).
+	m.messages = []chatMessage{
+		{role: "user", content: "step 1", gen: 4},
+		{role: "assistant", content: "answer 1", gen: 4},
+		{role: "user", content: "step 2", gen: 5},
+		{role: "tool", toolName: "bash", toolState: "running", gen: 5},
+		{role: "assistant", streaming: true, awaitingDelta: true, gen: 5},
+	}
+	server := []chatMessage{
+		{role: "user", content: "step 1"},          // server-canonical (gen=0)
+		{role: "assistant", content: "answer 1 (canonical)"},
+	}
+	m.mergeHistoryRefresh(server, 4)
+
+	if len(m.messages) != len(server)+3 {
+		t.Fatalf("merged len = %d, want %d", len(m.messages), len(server)+3)
+	}
+	if m.messages[0].content != "step 1" || m.messages[1].content != "answer 1 (canonical)" {
+		t.Errorf("server prefix not placed first: %+v", m.messages[:2])
+	}
+	tail := m.messages[2:]
+	if tail[0].content != "step 2" || tail[0].gen != 5 {
+		t.Errorf("live tail step-2 user lost: %+v", tail[0])
+	}
+	if tail[1].role != "tool" || tail[1].toolState != "running" {
+		t.Errorf("live tail tool card lost: %+v", tail[1])
+	}
+	if tail[2].role != "assistant" || !tail[2].awaitingDelta {
+		t.Errorf("live tail placeholder lost: %+v", tail[2])
+	}
+}
+
+// TestMergeHistoryRefresh_NoLiveTail pins the empty-tail case: if every
+// row sits at or below the boundary (the queue-fully-drained scenario),
+// the merge is equivalent to wholesale replacement.
+func TestMergeHistoryRefresh_NoLiveTail(t *testing.T) {
+	m := newTestChatModel()
+	m.gen = 3
+	m.messages = []chatMessage{
+		{role: "user", content: "old", gen: 1},
+		{role: "assistant", content: "older", gen: 2},
+	}
+	server := []chatMessage{
+		{role: "user", content: "fresh"},
+		{role: "assistant", content: "fresher"},
+	}
+	m.mergeHistoryRefresh(server, 2)
+
+	if len(m.messages) != 2 {
+		t.Fatalf("merged len = %d, want 2 (live tail empty)", len(m.messages))
+	}
+	if m.messages[0].content != "fresh" || m.messages[1].content != "fresher" {
+		t.Errorf("expected wholesale replacement, got %+v", m.messages)
+	}
+}
+
+// TestHandleEvent_FinalBumpsGen pins that a successful final is what
+// advances the generation counter. An "empty ack" final (no streaming
+// placeholder to finalise) must NOT bump — otherwise the boundary
+// would drift forward without a real turn completing, and a later
+// refresh would treat genuine live state as history-side.
+func TestHandleEvent_FinalBumpsGen(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	m.messages = []chatMessage{
+		{role: "user", content: "hi", gen: 1},
+		{role: "assistant", content: "ack", streaming: true, gen: 1},
+	}
+	startGen := m.gen
+
+	finalMsg := json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"ack"}]}`)
+	m.handleEvent(makeChatEvent("final", "run1", 1, finalMsg))
+
+	if m.gen != startGen+1 {
+		t.Errorf("successful final must bump gen: got %d, want %d", m.gen, startGen+1)
+	}
+}
+
+// TestHandleEvent_FinalRefreshesEvenWithQueuedMessages pins Layer 3:
+// the resync now fires on every final, even when a queued message is
+// about to be dispatched. Pre-Layer-3, a non-empty queue caused the
+// refresh to be deferred until the queue fully drained — which let
+// drift accumulate across queued turns. The merge in Layer 2 makes
+// this safe: the freshly-appended live tail survives the refresh.
+func TestHandleEvent_FinalRefreshesEvenWithQueuedMessages(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	m.pendingMessages = []string{"queued"}
+	m.messages = []chatMessage{
+		{role: "user", content: "first", gen: 1},
+		{role: "assistant", content: "answer", streaming: true, gen: 1},
+	}
+
+	finalMsg := json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"answer"}]}`)
+	cmd := m.handleEvent(makeChatEvent("final", "run1", 1, finalMsg))
+	if cmd == nil {
+		t.Fatal("expected a non-nil batch cmd from final")
+	}
+	if !batchProducesMsg(cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(historyRefreshMsg)
+		return ok
+	}) {
+		t.Error("expected historyRefreshMsg in the batch — Layer 3 must always resync, even with a queued message about to dispatch")
+	}
+	// The queued message must still have been drained: m.messages now
+	// contains the user turn for "queued" and a fresh placeholder.
+	last := m.messages[len(m.messages)-1]
+	if last.role != "assistant" || !last.streaming || !last.awaitingDelta {
+		t.Errorf("queued message should have appended a fresh placeholder, got %+v", last)
+	}
+}
+
+// TestHandleEvent_FinalRefreshesDuringRoutineAutoAdvance pins the
+// routine-specific case: under auto mode, every step's final now
+// resyncs *and* dispatches the next step. Pre-Layer-3, the refresh
+// was deferred to routine end, so a 10-step routine accumulated drift
+// across all 10 steps before the first server-canonical reconciliation.
+func TestHandleEvent_FinalRefreshesDuringRoutineAutoAdvance(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	m.activeRoutine = &activeRoutine{
+		routine: routines.Routine{
+			Name:  "demo",
+			Steps: []string{"step 1", "step 2", "step 3"},
+		},
+		mode: routines.ModeAuto,
+		sent: 1,
+	}
+	m.messages = []chatMessage{
+		{role: "user", content: "step 1", gen: 1},
+		{role: "assistant", content: "ok", streaming: true, gen: 1},
+	}
+
+	finalMsg := json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"ok"}]}`)
+	cmd := m.handleEvent(makeChatEvent("final", "run1", 1, finalMsg))
+	if cmd == nil {
+		t.Fatal("expected a non-nil batch cmd")
+	}
+	if !batchProducesMsg(cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(historyRefreshMsg)
+		return ok
+	}) {
+		t.Error("Layer 3: refresh must fire on every routine step's final, not just the last one")
+	}
+	// And the routine has advanced — step 2 was dispatched.
+	if m.activeRoutine == nil {
+		t.Fatal("active routine vanished")
+	}
+	if m.activeRoutine.sent != 2 {
+		t.Errorf("activeRoutine.sent = %d, want 2 (auto-advance must still fire)", m.activeRoutine.sent)
+	}
+}
+
+// batchProducesMsg walks a tea.Cmd (and any nested tea.BatchMsg) and
+// returns true when at least one leaf cmd produces a message
+// satisfying pred. Used to assert "this batch contains a refresh"
+// without caring about ordering or sibling cmds.
+func batchProducesMsg(cmd tea.Cmd, pred func(tea.Msg) bool) bool {
+	if cmd == nil {
+		return false
+	}
+	msg := cmd()
+	if msg == nil {
+		return false
+	}
+	if pred(msg) {
+		return true
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, sub := range batch {
+			if batchProducesMsg(sub, pred) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestHandleEvent_FinalEmptyAckDoesNotBumpGen is the negative case:
+// the gateway sometimes emits an early empty `final` ack before the
+// real response has been finalised. That must not advance the gen,
+// because no turn has actually completed.
+func TestHandleEvent_FinalEmptyAckDoesNotBumpGen(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	// Placeholder still awaitingDelta — the gateway ack arrives before
+	// any content has streamed.
+	m.messages = []chatMessage{
+		{role: "user", content: "hi", gen: 1},
+		{role: "assistant", streaming: true, awaitingDelta: true, gen: 1},
+	}
+	startGen := m.gen
+
+	emptyFinal := json.RawMessage(`{"role":"assistant","content":[]}`)
+	m.handleEvent(makeChatEvent("final", "run1", 1, emptyFinal))
+
+	if m.gen != startGen {
+		t.Errorf("empty ack must NOT bump gen: got %d, started at %d", m.gen, startGen)
+	}
+}
+
+// TestFinalisedRunSet_ReAddIsNoOp pins that re-adding an existing id
+// does not consume a slot or shuffle ordering.
+func TestFinalisedRunSet_ReAddIsNoOp(t *testing.T) {
+	var s finalisedRunSet
+	s.add("a")
+	s.add("b")
+	s.add("a")
+	if got := s.last(); got != "b" {
+		t.Errorf("last() = %q, want b — re-adding existing id must not move it to the tail", got)
+	}
+}
+
+// itoa is a tiny std-free helper so the test doesn't import strconv
+// just for run-id formatting.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 func TestHandleEvent_FinalMarksStreamingDone(t *testing.T) {
