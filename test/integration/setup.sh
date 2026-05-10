@@ -120,7 +120,7 @@ mkdir -p "$STATE_DIR"
 cp "$SCRIPT_DIR/openclaw.${PROVIDER}.json" "$STATE_DIR/openclaw.json"
 
 # Substitute the model name in the config template.
-sed -i.bak "s|%MODEL_NAME%|${MODEL}|g" "$STATE_DIR/openclaw.json"
+sed -i.bak "s|__MODEL__|${MODEL}|g" "$STATE_DIR/openclaw.json"
 rm -f "$STATE_DIR/openclaw.json.bak"
 
 ok "State directory ready at $STATE_DIR"

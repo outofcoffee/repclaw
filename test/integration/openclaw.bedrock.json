@@ -11,8 +11,8 @@
         "baseUrl": "https://bedrock-runtime.us-east-1.amazonaws.com",
         "models": [
           {
-            "id": "%MODEL_NAME%",
-            "name": "%MODEL_NAME%"
+            "id": "__MODEL__",
+            "name": "__MODEL__"
           }
         ]
       }
@@ -21,7 +21,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "amazon-bedrock/%MODEL_NAME%"
+        "primary": "amazon-bedrock/__MODEL__"
       }
     }
   },
