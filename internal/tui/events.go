@@ -166,6 +166,18 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 
 	logEvent("EVENT state=%s runID=%s seq=%d msgLen=%d sessionKey=%s", chatEv.State, chatEv.RunID, chatEv.Seq, len(chatEv.Message), chatEv.SessionKey)
 
+	// Drop stale events from a run we've already finalised. The gateway
+	// occasionally emits a duplicate `delta` (carrying the full content)
+	// after `final` with the same runID; if we let it through, the
+	// stale delta lands on the next routine step's placeholder, flips
+	// awaitingDelta, and lets a subsequent empty final spuriously
+	// finalise the next step — causing back-to-back routine steps to
+	// be advanced without a real response in between.
+	if chatEv.RunID != "" && chatEv.RunID == m.prevFinalisedRunID {
+		logEvent("  STALE event for finalised run %s — ignored", chatEv.RunID)
+		return nil
+	}
+
 	switch chatEv.State {
 	case "delta":
 		deltaText := extractTextFromMessage(chatEv.Message)
@@ -208,6 +220,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.thinking = extractThinkingFromMessage(chatEv.Message)
 				finalised = true
 				assistantContent = last.content
+				m.prevFinalisedRunID = chatEv.RunID
 				logEvent("  FINALISED — refreshing history thinking_len=%d", len(last.thinking))
 			}
 		}
@@ -256,6 +269,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.streaming = false
 				last.errMsg = chatEv.ErrorMessage
 				finalised = true
+				m.prevFinalisedRunID = chatEv.RunID
 			}
 		}
 		m.updateViewport()
@@ -279,6 +293,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.streaming = false
 				last.content += "\n[aborted]"
 				finalised = true
+				m.prevFinalisedRunID = chatEv.RunID
 			}
 		}
 		m.updateViewport()
