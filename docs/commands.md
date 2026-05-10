@@ -26,6 +26,9 @@ Slash input that isn't a built-in is checked against the loaded skill names: if 
 | `/export` | Write the current session's canonical history to a transcript file — see below |
 | `/export all` | Same as `/export` |
 | `/export routine` | Convert the session's user prompts into routine steps and open the form prepopulated — see below |
+| `/header` | Show the current chat header background colour |
+| `/header <hex>` | Set the chat header background to a hex colour (e.g. `#4FC3F7`, `#F0C`); persisted across runs — see below |
+| `/header reset` | Restore the default header colour (also accepts `default` or `off`) |
 | `/help`, `/commands` | Print static help text; appends skill count if any are loaded |
 | `/model <name>` | Switch model — see below |
 | `/models` | Open the model picker (filter as you type) |
@@ -55,6 +58,10 @@ Backend-only commands render a "not available on this connection" system message
 ### /stats
 
 Stats are loaded asynchronously via `client.SessionUsage()` on chat init and after each message exchange. `/stats` formats `m.stats` through `formatStatsTable()` in `internal/tui/render.go`, which produces a text table of input/output/cache tokens and cost breakdown.
+
+### /header
+
+`handleHeaderCommand()` parses the argument, runs it through `config.NormalizeHexColor()` (accepts `#RRGGBB`, `#RGB`, with or without the leading `#`), writes the canonical `#RRGGBB` value to `prefs.HeaderColor`, persists via `config.SavePreferences()`, and emits `prefsUpdatedMsg` so `AppModel.prefs` and `chatModel.prefs` stay in sync. The chat view's `View()` reads `m.prefs.HeaderColor` each render and overrides `headerStyle.Background()` (and the update-available warn-badge background, which sits inside the header) when the value is non-empty. Bare `/header` reports the current value; `/header reset` (also `default`, `off`) clears it. The colour is a global preference, not per-session.
 
 ### /record and /export
 
