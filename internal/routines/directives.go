@@ -8,7 +8,7 @@ import (
 // directivePattern matches a /routine: instruction occupying its own line.
 // Leading whitespace is allowed; trailing whitespace is allowed. The body
 // must be one of the supported keywords.
-var directivePattern = regexp.MustCompile(`^\s*/routine:(stop|pause|mode\s+(auto|manual))\s*$`)
+var directivePattern = regexp.MustCompile(`^\s*/routine:(stop|pause|continue|mode\s+(auto|manual))\s*$`)
 
 // ScanDirectives returns every /routine: directive found in reply, in order
 // of appearance. Each directive must occupy its own line — inline mentions
@@ -26,6 +26,8 @@ func ScanDirectives(reply string) []Directive {
 			out = append(out, Directive{Kind: DirectiveStop})
 		case strings.HasPrefix(strings.TrimSpace(m[1]), "pause"):
 			out = append(out, Directive{Kind: DirectivePause})
+		case strings.HasPrefix(strings.TrimSpace(m[1]), "continue"):
+			out = append(out, Directive{Kind: DirectiveContinue})
 		case m[2] == "auto":
 			out = append(out, Directive{Kind: DirectiveModeAuto})
 		case m[2] == "manual":

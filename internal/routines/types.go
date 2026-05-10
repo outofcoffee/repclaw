@@ -56,6 +56,11 @@ const (
 	DirectivePause
 	DirectiveModeAuto
 	DirectiveModeManual
+	// DirectiveContinue is a no-op the assistant can emit to make its
+	// intent explicit ("keep going") in conditional steps. The routine
+	// controller treats it as a recognised pass-through so unknown
+	// /routine: tokens don't silently advance under it.
+	DirectiveContinue
 )
 
 // Directive is a single parsed /routine: instruction.

@@ -35,6 +35,13 @@ func TestScanDirectives_InlineMentionIgnored(t *testing.T) {
 	}
 }
 
+func TestScanDirectives_Continue(t *testing.T) {
+	got := ScanDirectives("/routine:continue")
+	if len(got) != 1 || got[0].Kind != DirectiveContinue {
+		t.Errorf("got %+v, want [continue]", got)
+	}
+}
+
 func TestScanDirectives_ModeSwitch(t *testing.T) {
 	cases := []struct {
 		in   string
