@@ -44,21 +44,21 @@ coverage:
 coverage-html: coverage
 	go tool cover -html=coverage.out -o coverage.html
 
-.PHONY: test-integration-setup
-test-integration-setup:
-	./test/integration/setup.sh
+.PHONY: test-integration-openclaw-ollama-setup
+test-integration-openclaw-ollama-setup:
+	./test/integration/setup-openclaw-ollama.sh
 
-.PHONY: test-integration-setup-bedrock
-test-integration-setup-bedrock:
-	./test/integration/setup.sh --provider bedrock
+.PHONY: test-integration-openclaw-bedrock-setup
+test-integration-openclaw-bedrock-setup:
+	./test/integration/setup-openclaw-bedrock.sh
 
-.PHONY: test-integration
-test-integration:
+.PHONY: test-integration-openclaw
+test-integration-openclaw:
 	go test -tags integration -count=1 -v ./internal/tui/
 
-.PHONY: test-integration-teardown
-test-integration-teardown:
-	./test/integration/teardown.sh
+.PHONY: test-integration-openclaw-teardown
+test-integration-openclaw-teardown:
+	./test/integration/teardown-openclaw.sh
 
 .PHONY: test-integration-openai-setup
 test-integration-openai-setup:

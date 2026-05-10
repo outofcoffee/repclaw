@@ -74,7 +74,7 @@ Add or update tests whenever you change behaviour. Focus on core functionality �
 - Pure logic (formatters, wrapping, validation, slash parsing) → plain unit tests against the function.
 - Model state transitions → drive `Update` directly and assert on the returned model (see `commands_test.go`, `select_test.go`).
 - Rendered output → use `teatest/v2` against a model adapter (see `rendering_test.go`). Assert on ANSI-stripped bytes via a single `teatest.WaitFor` — repeated `WaitFor` calls drain `tm.Output()`.
-- Anything requiring a real backend → guard with a build tag so `go test ./...` stays hermetic. The OpenClaw suite uses `//go:build integration` (`queue_integration_test.go`); the OpenAI suite uses `//go:build integration_openai` (`internal/backend/openai/integration_test.go`). Both have matching `make test-integration{,-openai}-{setup,,teardown}` targets — see `test/integration/README.md`.
+- Anything requiring a real backend → guard with a build tag so `go test ./...` stays hermetic. The OpenClaw suite uses `//go:build integration` (`queue_integration_test.go`); the OpenAI suite uses `//go:build integration_openai` (`internal/backend/openai/integration_test.go`). Both have matching `make test-integration-{openclaw,openai}-{setup,,teardown}` targets (the OpenClaw setup splits further into `-ollama-setup` / `-bedrock-setup`) — see `test/integration/README.md`.
 
 Run `make test` before committing. Pushes trigger CI; a failing test blocks review.
 

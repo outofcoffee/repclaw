@@ -37,19 +37,19 @@ The LLM runs on the host (Metal-accelerated), while the gateway runs in Docker.
 
 ```bash
 # 1. Set up the environment (pulls model, starts gateway, pairs device)
-make test-integration-setup
+make test-integration-openclaw-ollama-setup
 
 # 2. Run integration tests
-make test-integration
+make test-integration-openclaw
 
 # 3. Tear down when done
-make test-integration-teardown
+make test-integration-openclaw-teardown
 ```
 
 ### Choosing a different model
 
 ```bash
-MODEL=qwen3.5:35b make test-integration-setup
+MODEL=qwen3.5:35b make test-integration-openclaw-ollama-setup
 ```
 
 | Model | Size | Notes |
@@ -64,9 +64,9 @@ places in addition to re-running setup:
 
 1. **`test/integration/openclaw.ollama.json`** — `models.providers.ollama.models[0].id`
    and `agents.defaults.model.primary` (use `ollama/<model>` for the routing key)
-2. **`test/integration/setup.sh`** — the `MODEL` default at the top of the file
+2. **`test/integration/setup-openclaw-ollama.sh`** — the `MODEL` default at the top of the file
 3. **`test/integration/state/openclaw.json`** — the live copy used by the running
-   gateway (or just re-run `make test-integration-setup` to regenerate it)
+   gateway (or just re-run `make test-integration-openclaw-ollama-setup` to regenerate it)
 
 ---
 
@@ -106,9 +106,9 @@ export AWS_ACCESS_KEY_ID=...
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_REGION=us-east-1   # optional — defaults to us-east-1
 
-make test-integration-setup-bedrock
-make test-integration
-make test-integration-teardown
+make test-integration-openclaw-bedrock-setup
+make test-integration-openclaw
+make test-integration-openclaw-teardown
 ```
 
 ### Discovering available models
@@ -124,28 +124,40 @@ docker compose -f test/integration/docker-compose.yml exec -T gateway \
 
 To change the default model, edit `test/integration/openclaw.bedrock.json` and
 update `agents.defaults.model.primary` to `amazon-bedrock/<model-id>`, then
-re-run `make test-integration-setup-bedrock`.
+re-run `make test-integration-openclaw-bedrock-setup`.
 
 ---
 
-## What `setup.sh` does
+## What the setup scripts do
 
-1. **Checks prerequisites** — Docker, jq, Go (+ Ollama for the Ollama provider; AWS credentials for Bedrock).
-2. **Ollama only** — starts Ollama if not running and pulls the test model.
-3. **Starts the OpenClaw gateway** in Docker via `docker-compose.yml`.
-4. **Pairs the local device** using this flow:
+There are two setup scripts that share the same gateway, state directory,
+and device-pairing flow but differ in their inference provider:
+
+- `setup-openclaw-ollama.sh` — checks Docker/jq/Go/Ollama, starts Ollama
+  if needed, pulls the test model, and seeds `openclaw.ollama.json`.
+- `setup-openclaw-bedrock.sh` — checks Docker/jq/Go, requires
+  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, and seeds
+  `openclaw.bedrock.json`.
+
+After the provider-specific prep, both scripts:
+
+1. **Start the OpenClaw gateway** in Docker via `docker-compose.yml`.
+2. **Pair the local device** using this flow:
    - Seeds the gateway token as the device token for the first connect.
    - Connects once to register the device (rejected with `NOT_PAIRED` — expected).
    - Approves the pending device via `openclaw devices approve <requestId>`.
    - Rotates the device token via `openclaw devices rotate` to get a proper credential.
    - Verifies the connection with the new device token.
-5. **Writes `.env`** with `OPENCLAW_GATEWAY_URL=http://localhost:18789`.
+3. **Write `.env`** with `OPENCLAW_GATEWAY_URL=http://localhost:18789`.
 
 After setup, the device identity at `~/.lucinate/identity/localhost_18789/` is paired with
 the test gateway. If you had an existing device token (from a production
 gateway), it is backed up to `device-token.backup` and restored on teardown.
 
-## What `teardown.sh` does
+## What `teardown-openclaw.sh` does
+
+A single teardown script handles both providers — they share gateway
+container, state directory, and device identity:
 
 1. Stops and removes the gateway container.
 2. Removes the gateway state directory (`test/integration/state/`).

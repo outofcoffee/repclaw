@@ -1,23 +1,18 @@
 #!/usr/bin/env bash
 #
-# Sets up the local integration test environment:
-#   1. Checks prerequisites (provider-specific)
-#   2. For Ollama: checks/starts Ollama and pulls the test model
-#   3. Starts the OpenClaw gateway in Docker
-#   4. Pairs the local device identity with the test gateway
+# Sets up the local OpenClaw integration test environment with the
+# AWS Bedrock provider:
+#   1. Checks prerequisites
+#   2. Starts the OpenClaw gateway in Docker (configured for Bedrock)
+#   3. Pairs the local device identity with the test gateway
 #
-# Prerequisites (Ollama provider):
-#   - Docker Desktop running
-#   - Ollama installed (brew install ollama)
-#   - jq installed (brew install jq)
-#
-# Prerequisites (Bedrock provider):
+# Prerequisites:
 #   - Docker Desktop running
 #   - jq installed (brew install jq)
 #   - AWS credentials: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
 #
 # Usage:
-#   ./test/integration/setup.sh [--provider ollama|bedrock] [--model MODEL]
+#   ./test/integration/setup-openclaw-bedrock.sh [--model MODEL]
 #
 set -euo pipefail
 
@@ -27,28 +22,19 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 IDENTITY_DIR="$HOME/.lucinate/identity/localhost_18789"
 BACKUP_FILE="$IDENTITY_DIR/device-token.backup"
 
-PROVIDER="${PROVIDER:-ollama}"
-MODEL="${MODEL:-qwen2.5:1.5b}"
+MODEL="${MODEL:-zai.glm-5}"
 GATEWAY_URL="http://localhost:18789"
 GATEWAY_WS_URL="ws://127.0.0.1:18789/ws"
-HEALTH_TIMEOUT=60
-
 GATEWAY_TOKEN="lucinate"
 
 # --- Parse args -----------------------------------------------------------
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --provider) PROVIDER="$2"; shift 2 ;;
-        --model)    MODEL="$2";    shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
-
-if [[ "$PROVIDER" != "ollama" && "$PROVIDER" != "bedrock" ]]; then
-    echo "Unknown provider: $PROVIDER (must be 'ollama' or 'bedrock')" >&2
-    exit 1
-fi
 
 # --- Helpers ---------------------------------------------------------------
 
@@ -68,45 +54,11 @@ check_prereq docker "Install Docker Desktop: https://www.docker.com/products/doc
 check_prereq jq     "Install jq: brew install jq"
 check_prereq go     "Install Go: https://go.dev/dl/"
 
-if [ "$PROVIDER" = "ollama" ]; then
-    check_prereq ollama "Install Ollama: brew install ollama"
-fi
-
-if [ "$PROVIDER" = "bedrock" ]; then
-    [ -n "${AWS_ACCESS_KEY_ID:-}" ]     || fail "AWS_ACCESS_KEY_ID is not set"
-    [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] || fail "AWS_SECRET_ACCESS_KEY is not set"
-    ok "AWS credentials found (region: ${AWS_REGION:-us-east-1})"
-fi
+[ -n "${AWS_ACCESS_KEY_ID:-}" ]     || fail "AWS_ACCESS_KEY_ID is not set"
+[ -n "${AWS_SECRET_ACCESS_KEY:-}" ] || fail "AWS_SECRET_ACCESS_KEY is not set"
+ok "AWS credentials found (region: ${AWS_REGION:-us-east-1})"
 
 ok "All prerequisites found"
-
-# --- Ollama ----------------------------------------------------------------
-
-if [ "$PROVIDER" = "ollama" ]; then
-    info "Checking Ollama"
-    if ! curl -fsS http://localhost:11434/api/tags &>/dev/null; then
-        warn "Ollama is not running — starting it"
-        ollama serve &>/dev/null &
-        OLLAMA_PID=$!
-        # Wait for Ollama to be ready.
-        for i in $(seq 1 30); do
-            if curl -fsS http://localhost:11434/api/tags &>/dev/null; then
-                break
-            fi
-            if [ "$i" -eq 30 ]; then
-                fail "Ollama failed to start"
-            fi
-            sleep 1
-        done
-        ok "Ollama started (pid $OLLAMA_PID)"
-    else
-        ok "Ollama is running"
-    fi
-
-    info "Pulling model: $MODEL"
-    ollama pull "$MODEL"
-    ok "Model ready"
-fi
 
 # --- Gateway ---------------------------------------------------------------
 
@@ -117,7 +69,7 @@ STATE_DIR="$SCRIPT_DIR/state"
 # device skips the pending-registration step the script relies on.
 rm -rf "$STATE_DIR"
 mkdir -p "$STATE_DIR"
-cp "$SCRIPT_DIR/openclaw.${PROVIDER}.json" "$STATE_DIR/openclaw.json"
+cp "$SCRIPT_DIR/openclaw.bedrock.json" "$STATE_DIR/openclaw.json"
 
 # Substitute the model name in the config template.
 sed -i.bak "s|__MODEL__|${MODEL}|g" "$STATE_DIR/openclaw.json"
@@ -235,22 +187,18 @@ ok "Wrote .env with OPENCLAW_GATEWAY_URL=$GATEWAY_URL"
 # --- Done ------------------------------------------------------------------
 
 echo ""
-info "Integration test environment is ready"
+info "OpenClaw (Bedrock) integration test environment is ready"
 echo ""
-echo "  Provider: $PROVIDER"
+echo "  Provider: bedrock"
 echo "  Gateway:  $GATEWAY_URL"
-if [ "$PROVIDER" = "ollama" ]; then
-    echo "  Model:    ollama/$MODEL"
-else
-    echo "  Model:    see openclaw.bedrock.json (agents.defaults.model.primary)"
-    echo ""
-    echo "  To list available Bedrock models:"
-    echo "    docker compose -f $COMPOSE_FILE exec -T gateway \\"
-    echo "      openclaw models list --json \\"
-    echo "      --token $GATEWAY_TOKEN --url $GATEWAY_WS_URL"
-fi
+echo "  Model:    amazon-bedrock/$MODEL"
 echo "  Identity: $IDENTITY_DIR"
 echo ""
-echo "  Run tests:     make test-integration"
-echo "  Tear down:     make test-integration-teardown"
+echo "  To list available Bedrock models:"
+echo "    docker compose -f $COMPOSE_FILE exec -T gateway \\"
+echo "      openclaw models list --json \\"
+echo "      --token $GATEWAY_TOKEN --url $GATEWAY_WS_URL"
+echo ""
+echo "  Run tests:     make test-integration-openclaw"
+echo "  Tear down:     make test-integration-openclaw-teardown"
 echo ""

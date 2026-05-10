@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Tears down the local integration test environment:
+# Tears down the local OpenClaw integration test environment (shared
+# between the Ollama and Bedrock provider setups):
 #   1. Stops and removes the OpenClaw gateway container
 #   2. Restores any backed-up device token
 #
 # Usage:
-#   ./test/integration/teardown.sh
+#   ./test/integration/teardown-openclaw.sh
 #
 set -euo pipefail
 
