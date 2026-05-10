@@ -158,7 +158,7 @@ type chatModel struct {
 	agentName          string
 	sending            bool
 	runID              string // active run ID for cancellation
-	prevFinalisedRunID string // the chat run we most recently finalised; chat events still bearing this runID are stale duplicates emitted by the gateway after final and must not corrupt the next run's placeholder
+	finalisedRuns      finalisedRunSet // bounded LRU of run IDs we have already finalised; chat events still bearing one of these IDs are stale duplicates emitted by the gateway after final and must not corrupt the next run's placeholder
 	pendingMessages    []string
 	width              int
 	height             int

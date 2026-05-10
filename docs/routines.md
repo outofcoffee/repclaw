@@ -100,16 +100,18 @@ Auto-advance lives in the `final` case of `handleEvent` (`internal/tui/events.go
 
 The OpenClaw gateway has been observed emitting a duplicate `delta` event with the full content right *after* the matching `final`, on the same `runID`. Without filtering, that delta lands on the next routine step's freshly-appended placeholder, flipping `awaitingDelta` and letting a subsequent empty-content `final` falsely finalise an empty turn — which spuriously auto-advances the routine.
 
-`chatModel.prevFinalisedRunID` tracks the last finalised run; the top of the chat-event branch in `handleEvent` drops any event whose `RunID` matches it:
+`chatModel.finalisedRuns` is a bounded LRU set (cap `finalisedRunsCap = 32`) of run IDs we have already finalised; the top of the chat-event branch in `handleEvent` drops any event whose `RunID` is a member:
 
 ```go
-if chatEv.RunID != "" && chatEv.RunID == m.prevFinalisedRunID {
+if m.finalisedRuns.contains(chatEv.RunID) {
     logEvent("  STALE event for finalised run %s — ignored", chatEv.RunID)
     return nil
 }
 ```
 
-`prevFinalisedRunID` is set inside the `final`, `error`, and `aborted` paths, but only when the corresponding state mutation actually happened (gated on the same `finalised` flag). `TestHandleEvent_StaleDeltaAfterFinalIgnored` covers the bug end-to-end.
+The set is added to inside the `final`, `error`, and `aborted` paths, but only when the corresponding state mutation actually happened (gated on the same `finalised` flag). FIFO eviction keeps a long-lived chat from growing the filter unboundedly.
+
+The set's depth matters: a single-deep filter is enough for the immediate duplicate-after-final case, but back-to-back routine steps open a wider window. A stale event for run N-2 can arrive while run N is streaming; with only the most-recent run remembered, that earlier id slips past and corrupts the live placeholder. `TestHandleEvent_StaleDeltaAfterFinalIgnored` pins the duplicate case; `TestHandleEvent_StaleDeltaFromOlderRunIgnored` pins the back-to-back race; `TestFinalisedRunSet_EvictsOldestPastCap` pins the FIFO bound.
 
 ## Directives
 
@@ -224,7 +226,7 @@ Unit tests:
 - `internal/routines/directives_test.go` — own-line matching, inline-mention rejection, all five directive kinds.
 - `internal/routines/store_test.go` — disk round-trip, invalid-name rejection.
 - `internal/routines/log_test.go` — header + per-message timestamp shape, multi-line bodies, append across reopens, nil-receiver safety.
-- `internal/tui/events_test.go::TestHandleEvent_StaleDeltaAfterFinalIgnored` — pins the duplicate-delta-after-final filter.
+- `internal/tui/events_test.go::TestHandleEvent_StaleDeltaAfterFinalIgnored` / `TestHandleEvent_StaleDeltaFromOlderRunIgnored` / `TestFinalisedRunSet_*` — pin the bounded stale-run filter.
 - `internal/tui/notifications_test.go` — notify/clear and history-refresh persistence.
 
 Manual smoke:

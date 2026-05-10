@@ -193,8 +193,8 @@ func TestHandleEvent_StaleDeltaAfterFinalIgnored(t *testing.T) {
 	finalMsg := json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"3, 9"}]}`)
 	m.handleEvent(makeChatEvent("final", "run1", 5, finalMsg))
 
-	if m.prevFinalisedRunID != "run1" {
-		t.Fatalf("prevFinalisedRunID = %q, want run1", m.prevFinalisedRunID)
+	if !m.finalisedRuns.contains("run1") {
+		t.Fatalf("finalisedRuns should contain run1, got last=%q", m.finalisedRuns.last())
 	}
 
 	// Simulate routine auto-advance: append a fresh placeholder for the
@@ -222,6 +222,128 @@ func TestHandleEvent_StaleDeltaAfterFinalIgnored(t *testing.T) {
 	if !m.messages[len(m.messages)-1].streaming {
 		t.Error("step 2 should still be streaming; empty final must not finalise when no deltas have arrived")
 	}
+}
+
+// TestHandleEvent_StaleDeltaFromOlderRunIgnored covers the back-to-back
+// routine race the bounded set fixes: a stale event for run N-2 arrives
+// while run N is streaming. The previous one-deep prevFinalisedRunID
+// filter only caught duplicates of the *most recent* final, so a stale
+// delta or final for any earlier run would slip through and corrupt
+// the live placeholder. With the LRU, every recent finalised run is
+// remembered.
+func TestHandleEvent_StaleDeltaFromOlderRunIgnored(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+
+	// Walk through three back-to-back routine steps. After each final,
+	// the run's id is added to the set; after the third, the set holds
+	// run1, run2, run3.
+	m.messages = []chatMessage{
+		{role: "user", content: "step 1"},
+		{role: "assistant", content: "reply 1", streaming: true},
+	}
+	m.handleEvent(makeChatEvent("final", "run1", 1, json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"reply 1"}]}`)))
+
+	m.messages = append(m.messages,
+		chatMessage{role: "user", content: "step 2"},
+		chatMessage{role: "assistant", content: "reply 2", streaming: true},
+	)
+	m.handleEvent(makeChatEvent("final", "run2", 1, json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"reply 2"}]}`)))
+
+	m.messages = append(m.messages,
+		chatMessage{role: "user", content: "step 3"},
+		chatMessage{role: "assistant", streaming: true, awaitingDelta: true},
+	)
+
+	// Stale delta from run1 arrives — single-deep filter would let this
+	// through because prevFinalisedRunID has moved on to run2.
+	m.handleEvent(makeChatEvent("delta", "run1", 99, json.RawMessage(`"corrupted"`)))
+
+	last := m.messages[len(m.messages)-1]
+	if last.content != "" {
+		t.Errorf("run1 stale delta must not corrupt run3's placeholder: content = %q", last.content)
+	}
+	if !last.awaitingDelta {
+		t.Error("run1 stale delta must not flip awaitingDelta on run3's placeholder")
+	}
+
+	// Stale final from run2 should also be filtered.
+	m.handleEvent(makeChatEvent("final", "run2", 99, json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"x"}]}`)))
+	if !m.messages[len(m.messages)-1].streaming {
+		t.Error("run2 stale final must not finalise run3's placeholder")
+	}
+}
+
+// TestFinalisedRunSet_EvictsOldestPastCap pins the FIFO eviction so a
+// long-running session doesn't grow the set unboundedly. We add cap+1
+// distinct ids and confirm the very first is no longer a member.
+func TestFinalisedRunSet_EvictsOldestPastCap(t *testing.T) {
+	var s finalisedRunSet
+	for i := 0; i <= finalisedRunsCap; i++ {
+		s.add("r" + itoa(i))
+	}
+	if s.contains("r0") {
+		t.Error("r0 should have been evicted after adding cap+1 ids")
+	}
+	if !s.contains("r" + itoa(finalisedRunsCap)) {
+		t.Error("most recent id must still be a member")
+	}
+	if !s.contains("r1") {
+		t.Error("r1 should still be a member (only r0 evicted)")
+	}
+	if got := s.last(); got != "r"+itoa(finalisedRunsCap) {
+		t.Errorf("last() = %q, want r%d", got, finalisedRunsCap)
+	}
+}
+
+// TestFinalisedRunSet_IgnoresEmpty pins that empty ids are not stored
+// and not reported as members — older gateways may emit events without
+// a runID and those must fall through the filter, not be matched.
+func TestFinalisedRunSet_IgnoresEmpty(t *testing.T) {
+	var s finalisedRunSet
+	s.add("")
+	if s.contains("") {
+		t.Error("empty id must never be a member")
+	}
+	if got := s.last(); got != "" {
+		t.Errorf("last() with empty inputs = %q, want \"\"", got)
+	}
+}
+
+// TestFinalisedRunSet_ReAddIsNoOp pins that re-adding an existing id
+// does not consume a slot or shuffle ordering.
+func TestFinalisedRunSet_ReAddIsNoOp(t *testing.T) {
+	var s finalisedRunSet
+	s.add("a")
+	s.add("b")
+	s.add("a")
+	if got := s.last(); got != "b" {
+		t.Errorf("last() = %q, want b — re-adding existing id must not move it to the tail", got)
+	}
+}
+
+// itoa is a tiny std-free helper so the test doesn't import strconv
+// just for run-id formatting.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 func TestHandleEvent_FinalMarksStreamingDone(t *testing.T) {

@@ -57,6 +57,68 @@ func extractTextFromMessage(raw json.RawMessage) string {
 	return backend.ExtractChatText(raw)
 }
 
+// finalisedRunsCap bounds the size of finalisedRunSet. The gateway emits
+// stale duplicates rarely and only within a small window after final, so
+// 32 prior runs is far more than needed in practice — but keeping a hard
+// cap means a long-lived chat with thousands of turns never grows the
+// filter unboundedly.
+const finalisedRunsCap = 32
+
+// finalisedRunSet is a bounded FIFO set of run IDs we have already
+// finalised, used to drop stale chat events the gateway emits after a
+// run has completed. The previous implementation tracked only the most
+// recent finalised run, which was sufficient for the duplicate-after-
+// final case but missed the back-to-back routine race: if a stale event
+// arrives for run N-2 while run N-1 is streaming, it would slip past
+// the single-deep filter (since prevFinalised had moved on to run N-1)
+// and corrupt the placeholder. With a bounded set we cover that window
+// without retaining state across sessions.
+type finalisedRunSet struct {
+	ids   []string        // ordered oldest→newest; len ≤ finalisedRunsCap
+	inSet map[string]bool // O(1) membership for contains()
+}
+
+// add records id as finalised. Empty IDs are ignored (older gateways,
+// non-run-scoped events). Re-adding an existing id is a no-op so the
+// FIFO ordering stays meaningful.
+func (s *finalisedRunSet) add(id string) {
+	if id == "" {
+		return
+	}
+	if s.inSet == nil {
+		s.inSet = make(map[string]bool, finalisedRunsCap)
+	}
+	if s.inSet[id] {
+		return
+	}
+	if len(s.ids) >= finalisedRunsCap {
+		oldest := s.ids[0]
+		s.ids = s.ids[1:]
+		delete(s.inSet, oldest)
+	}
+	s.ids = append(s.ids, id)
+	s.inSet[id] = true
+}
+
+// contains reports whether id has been finalised. Empty IDs are never
+// members so callers can pass chatEv.RunID directly without guarding.
+func (s *finalisedRunSet) contains(id string) bool {
+	if id == "" {
+		return false
+	}
+	return s.inSet[id]
+}
+
+// last returns the most recently added id, or "" when the set is empty.
+// Useful for tests that want to assert "the most recent finalisation
+// was run X" without poking at internals.
+func (s *finalisedRunSet) last() string {
+	if len(s.ids) == 0 {
+		return ""
+	}
+	return s.ids[len(s.ids)-1]
+}
+
 // extractEventSessionKey pulls a top-level "sessionKey" string out of any
 // event payload. Returns "" when the payload has no sessionKey, is empty,
 // or fails to parse — those cases must be allowed through (older gateways,
@@ -166,14 +228,16 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 
 	logEvent("EVENT state=%s runID=%s seq=%d msgLen=%d sessionKey=%s", chatEv.State, chatEv.RunID, chatEv.Seq, len(chatEv.Message), chatEv.SessionKey)
 
-	// Drop stale events from a run we've already finalised. The gateway
-	// occasionally emits a duplicate `delta` (carrying the full content)
-	// after `final` with the same runID; if we let it through, the
-	// stale delta lands on the next routine step's placeholder, flips
-	// awaitingDelta, and lets a subsequent empty final spuriously
-	// finalise the next step — causing back-to-back routine steps to
-	// be advanced without a real response in between.
-	if chatEv.RunID != "" && chatEv.RunID == m.prevFinalisedRunID {
+	// Drop stale events from any run we have already finalised. The
+	// gateway occasionally emits a duplicate `delta` (carrying the full
+	// content) after `final` with the same runID; if we let it through,
+	// the stale delta lands on the next routine step's placeholder,
+	// flips awaitingDelta, and lets a subsequent empty final spuriously
+	// finalise the next step. The set is bounded so the filter covers
+	// back-to-back routine steps where a stale event for run N-k can
+	// arrive while run N is streaming, not just the immediately prior
+	// run.
+	if m.finalisedRuns.contains(chatEv.RunID) {
 		logEvent("  STALE event for finalised run %s — ignored", chatEv.RunID)
 		return nil
 	}
@@ -220,7 +284,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.thinking = extractThinkingFromMessage(chatEv.Message)
 				finalised = true
 				assistantContent = last.content
-				m.prevFinalisedRunID = chatEv.RunID
+				m.finalisedRuns.add(chatEv.RunID)
 				logEvent("  FINALISED — refreshing history thinking_len=%d", len(last.thinking))
 			}
 		}
@@ -269,7 +333,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.streaming = false
 				last.errMsg = chatEv.ErrorMessage
 				finalised = true
-				m.prevFinalisedRunID = chatEv.RunID
+				m.finalisedRuns.add(chatEv.RunID)
 			}
 		}
 		m.updateViewport()
@@ -293,7 +357,7 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 				last.streaming = false
 				last.content += "\n[aborted]"
 				finalised = true
-				m.prevFinalisedRunID = chatEv.RunID
+				m.finalisedRuns.add(chatEv.RunID)
 			}
 		}
 		m.updateViewport()
