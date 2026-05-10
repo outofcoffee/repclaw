@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-05-10
+### Added
+- feat(routines): add Duplicate action with collision-aware naming
+- feat(tui): add transcript record/export and improve routine form
+- feat(tui): cue manual-mode routines with call-to-action in the status row
+- feat(tui): cycle routine mode with shift+tab and surface ctrl+s to save
+
+### Changed
+- style(tui): colour the routine status row by mode
+- test: split bedrock and ollama setup
+- test: substitute model name in integration test config
+- test: use same model placeholder as hermes config
+
+### Fixed
+- fix(tui): end manual routines on their final reply
+
 ## [1.15.0] - 2026-05-10
 ### Added
 - feat: add multi-step routines (#128)
