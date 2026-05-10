@@ -177,6 +177,7 @@ type chatModel struct {
 	prefs              config.Preferences
 	pendingConfirm     *pendingConfirmation
 	pendingNavConfirm  *pendingNavConfirm
+	notifications      []notification // ephemeral status rows rendered above the input; cleared when the user submits an input
 	historyLimit       int
 	historyLoading     bool   // true while the initial history fetch is in flight; gates the placeholder in updateViewport
 	thinkingLevel      string // current thinking level; "" means not set / using gateway default
@@ -619,7 +620,8 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		case "esc":
 			if m.pendingNavConfirm != nil {
 				m.pendingNavConfirm = nil
-				m.messages = append(m.messages, chatMessage{role: "system", content: "Cancelled — routine continues."})
+				m.clearNotifications()
+				m.notify("Cancelled — routine continues.")
 				m.updateViewport()
 				return m, nil
 			}
@@ -686,11 +688,19 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 				// branch only when there is content.
 				if ar := m.activeRoutine; ar != nil && !m.sending {
 					if (ar.mode == routines.ModeManual || ar.paused) && ar.sent < len(ar.routine.Steps) {
+						m.clearNotifications()
 						return m, m.sendNextRoutineStep()
 					}
 				}
 				return m, nil
 			}
+
+			// Any non-empty submission (typed text, y/n on a confirm,
+			// slash command, queued message) clears the ephemeral
+			// notification rows above the input — the user has just
+			// taken a meaningful action and any pending notifications
+			// have either been read or no longer apply.
+			m.clearNotifications()
 
 			// Resolve a pending routine-cancel-on-navigation prompt. Done
 			// before the generic pendingConfirm path because the nav
@@ -719,7 +729,7 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 					m.updateViewport()
 					return m, tea.Batch(cmds...)
 				}
-				m.messages = append(m.messages, chatMessage{role: "system", content: "Cancelled — routine continues."})
+				m.notify("Cancelled — routine continues.")
 				m.updateViewport()
 				return m, nil
 			}
@@ -732,7 +742,7 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 				m.pendingConfirm = nil
 				lower := strings.ToLower(text)
 				if lower == "y" || lower == "yes" {
-					m.messages = append(m.messages, chatMessage{role: "system", content: "Confirmed."})
+					m.notify("Confirmed.")
 					var spinnerCmd tea.Cmd
 					if confirm.runningStatus != "" {
 						m.messages = append(m.messages, chatMessage{
@@ -745,7 +755,7 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 					m.updateViewport()
 					return m, tea.Batch(confirm.action(), spinnerCmd)
 				}
-				m.messages = append(m.messages, chatMessage{role: "system", content: "Cancelled."})
+				m.notify("Cancelled.")
 				m.updateViewport()
 				return m, nil
 			}
@@ -945,7 +955,7 @@ func (m *chatModel) sendMessage(text string) tea.Cmd {
 // cancelTurn aborts the active turn and clears pending messages.
 func (m *chatModel) cancelTurn() tea.Cmd {
 	if !m.sending || m.runID == "" {
-		m.messages = append(m.messages, chatMessage{role: "system", content: "Nothing to cancel."})
+		m.notify("Nothing to cancel.")
 		m.updateViewport()
 		return nil
 	}
@@ -963,7 +973,7 @@ func (m *chatModel) cancelTurn() tea.Cmd {
 			last.content += "\n[aborted]"
 		}
 	}
-	m.messages = append(m.messages, chatMessage{role: "system", content: "Cancelled."})
+	m.notify("Cancelled.")
 	m.updateViewport()
 	return func() tea.Msg {
 		err := b.ChatAbort(context.Background(), sessionKey, runID)
@@ -1200,9 +1210,13 @@ func (m chatModel) View() string {
 	if line := m.routineStatusLine(); line != "" {
 		routineStatus = routineStatusStyle.Width(m.width).Render(line)
 	}
+	notifications := m.renderNotifications()
 
 	if m.hideInput {
 		parts := []string{header, m.viewport.View()}
+		if notifications != "" {
+			parts = append(parts, notifications)
+		}
 		if routineStatus != "" {
 			parts = append(parts, routineStatus)
 		}
@@ -1217,6 +1231,9 @@ func (m chatModel) View() string {
 	parts := []string{header, m.viewport.View()}
 	if menu != "" {
 		parts = append(parts, menu)
+	}
+	if notifications != "" {
+		parts = append(parts, notifications)
 	}
 	if routineStatus != "" {
 		parts = append(parts, routineStatus)

@@ -65,10 +65,7 @@ func (m *chatModel) startRoutine(name string) tea.Cmd {
 	}
 	m.activeRoutine = ar
 	m.applyLayout()
-	m.messages = append(m.messages, chatMessage{
-		role:    "system",
-		content: fmt.Sprintf("Routine %q started — %d step(s), %s mode.", r.Name, len(r.Steps), ar.mode),
-	})
+	m.notify(fmt.Sprintf("Routine %q started — %d step(s), %s mode.", r.Name, len(r.Steps), ar.mode))
 	return m.sendNextRoutineStep()
 }
 
@@ -130,10 +127,12 @@ func (m *chatModel) applyDirectives(reply string) {
 			m.endRoutine("stopped by assistant")
 		case routines.DirectivePause:
 			m.activeRoutine.paused = true
-			m.messages = append(m.messages, chatMessage{
-				role:    "system",
-				content: "Routine paused — press Enter to send the next step, Esc to end.",
-			})
+			m.notify("Routine paused — press Enter to send the next step, Esc to end.")
+		case routines.DirectiveContinue:
+			// Explicit no-op: the assistant declared its intent to keep
+			// going. Unsetting paused lets a /routine:continue resume a
+			// previously-paused routine in auto mode.
+			m.activeRoutine.paused = false
 		case routines.DirectiveModeAuto:
 			m.activeRoutine.mode = routines.ModeAuto
 			m.activeRoutine.paused = false
@@ -155,10 +154,7 @@ func (m *chatModel) endRoutine(reason string) {
 	}
 	m.activeRoutine = nil
 	m.applyLayout()
-	m.messages = append(m.messages, chatMessage{
-		role:    "system",
-		content: fmt.Sprintf("Routine %q %s.", ar.routine.Name, reason),
-	})
+	m.notify(fmt.Sprintf("Routine %q %s.", ar.routine.Name, reason))
 }
 
 // cycleRoutineMode flips the active routine between auto and manual.
@@ -195,15 +191,15 @@ func (m *chatModel) gateNavigation(label string, navCmd tea.Cmd) tea.Cmd {
 		prompt: prompt,
 		nav:    navCmd,
 	}
-	m.messages = append(m.messages, chatMessage{role: "system", content: prompt})
-	m.updateViewport()
+	m.notify(prompt)
 	return nil
 }
 
-// appendSystemError is a small helper for routine-initiated error rows.
+// appendSystemError publishes a routine-initiated error as an
+// error-styled notification. The name is kept for callers that pre-date
+// the notification system.
 func (m *chatModel) appendSystemError(msg string) {
-	m.messages = append(m.messages, chatMessage{role: "system", errMsg: msg})
-	m.updateViewport()
+	m.notifyError(msg)
 }
 
 // routineStatusLine renders the in-chat status row for the active routine.

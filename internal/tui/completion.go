@@ -365,6 +365,7 @@ func (m *chatModel) applyLayout() {
 	if m.activeRoutine != nil {
 		h--
 	}
+	h -= len(m.notifications)
 	if h < 1 {
 		h = 1
 	}
