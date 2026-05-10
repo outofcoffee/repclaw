@@ -167,6 +167,52 @@ func TestSaveAndLoad_UpdateCheckFields(t *testing.T) {
 	}
 }
 
+func TestNormalizeHexColor(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"#aabbcc", "#AABBCC"},
+		{"aabbcc", "#AABBCC"},
+		{"#ABC", "#AABBCC"},
+		{"abc", "#AABBCC"},
+		{"  #112233  ", "#112233"},
+		{"#FfEeDd", "#FFEEDD"},
+	}
+	for _, c := range cases {
+		got, err := NormalizeHexColor(c.in)
+		if err != nil {
+			t.Errorf("NormalizeHexColor(%q) returned error: %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("NormalizeHexColor(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+
+	bad := []string{"", "#", "#1", "#12", "#12345", "#1234567", "ghijkl", "#xyzxyz", "red"}
+	for _, in := range bad {
+		if _, err := NormalizeHexColor(in); err == nil {
+			t.Errorf("NormalizeHexColor(%q) expected error, got nil", in)
+		}
+	}
+}
+
+func TestSaveAndLoadPreferences_HeaderColor(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	p := DefaultPreferences()
+	p.HeaderColor = "#4FC3F7"
+	if err := SavePreferences(p); err != nil {
+		t.Fatalf("SavePreferences: %v", err)
+	}
+	loaded := LoadPreferences()
+	if loaded.HeaderColor != "#4FC3F7" {
+		t.Errorf("expected HeaderColor %q after round-trip, got %q", "#4FC3F7", loaded.HeaderColor)
+	}
+}
+
 func TestLoadPreferences_FutureTimestampReset(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)

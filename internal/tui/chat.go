@@ -1352,8 +1352,12 @@ func (m chatModel) View() string {
 	if badge := connectionBadge(m.connState); badge != "" {
 		left += " · " + badge
 	}
+	warnBadgeStyle := headerBadgeWarnStyle
+	if m.prefs.HeaderColor != "" {
+		warnBadgeStyle = warnBadgeStyle.Background(lipgloss.Color(m.prefs.HeaderColor))
+	}
 	if m.updateLatest != "" {
-		left += " · " + headerBadgeWarnStyle.Render("↑ "+m.updateLatest)
+		left += " · " + warnBadgeStyle.Render("↑ "+m.updateLatest)
 	}
 	right := ""
 	if m.contextWindow > 0 && m.promptTokens > 0 {
@@ -1382,7 +1386,11 @@ func (m chatModel) View() string {
 			title += strings.Repeat(" ", padding) + right
 		}
 	}
-	header := headerStyle.
+	hdrStyle := headerStyle
+	if m.prefs.HeaderColor != "" {
+		hdrStyle = hdrStyle.Background(lipgloss.Color(m.prefs.HeaderColor))
+	}
+	header := hdrStyle.
 		Width(m.width).
 		Render(title)
 

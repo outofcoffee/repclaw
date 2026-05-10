@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -30,6 +32,32 @@ type Preferences struct {
 	CheckForUpdates       *bool  `json:"checkForUpdates,omitempty"`
 	LastUpdateCheck       int64  `json:"lastUpdateCheck,omitempty"`
 	LatestSeenVersion     string `json:"latestSeenVersion,omitempty"`
+	// HeaderColor is the user-chosen hex background for the chat
+	// header bar, normalised to "#RRGGBB". Empty means use the
+	// built-in default.
+	HeaderColor string `json:"headerColor,omitempty"`
+}
+
+// NormalizeHexColor validates a hex colour string and returns it in
+// canonical "#RRGGBB" form. Accepts inputs with or without a leading
+// "#" and the 3-digit "#RGB" shorthand. Returns an error when the
+// input is not a valid hex colour.
+func NormalizeHexColor(s string) (string, error) {
+	raw := strings.TrimSpace(s)
+	raw = strings.TrimPrefix(raw, "#")
+	if len(raw) != 3 && len(raw) != 6 {
+		return "", fmt.Errorf("invalid hex colour %q: expected 3 or 6 hex digits", s)
+	}
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return "", fmt.Errorf("invalid hex colour %q: non-hex digit %q", s, string(c))
+		}
+	}
+	if len(raw) == 3 {
+		raw = string([]byte{raw[0], raw[0], raw[1], raw[1], raw[2], raw[2]})
+	}
+	return "#" + strings.ToUpper(raw), nil
 }
 
 // UpdateChecksEnabled reports whether the user has the startup
