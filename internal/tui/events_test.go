@@ -7,6 +7,9 @@ import (
 
 	"github.com/a3tai/openclaw-go/protocol"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/lucinate-ai/lucinate/internal/routines"
 )
 
 // makeChatEvent builds a protocol.Event wrapping a ChatEvent payload.
@@ -399,6 +402,106 @@ func TestHandleEvent_FinalBumpsGen(t *testing.T) {
 	if m.gen != startGen+1 {
 		t.Errorf("successful final must bump gen: got %d, want %d", m.gen, startGen+1)
 	}
+}
+
+// TestHandleEvent_FinalRefreshesEvenWithQueuedMessages pins Layer 3:
+// the resync now fires on every final, even when a queued message is
+// about to be dispatched. Pre-Layer-3, a non-empty queue caused the
+// refresh to be deferred until the queue fully drained — which let
+// drift accumulate across queued turns. The merge in Layer 2 makes
+// this safe: the freshly-appended live tail survives the refresh.
+func TestHandleEvent_FinalRefreshesEvenWithQueuedMessages(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	m.pendingMessages = []string{"queued"}
+	m.messages = []chatMessage{
+		{role: "user", content: "first", gen: 1},
+		{role: "assistant", content: "answer", streaming: true, gen: 1},
+	}
+
+	finalMsg := json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"answer"}]}`)
+	cmd := m.handleEvent(makeChatEvent("final", "run1", 1, finalMsg))
+	if cmd == nil {
+		t.Fatal("expected a non-nil batch cmd from final")
+	}
+	if !batchProducesMsg(cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(historyRefreshMsg)
+		return ok
+	}) {
+		t.Error("expected historyRefreshMsg in the batch — Layer 3 must always resync, even with a queued message about to dispatch")
+	}
+	// The queued message must still have been drained: m.messages now
+	// contains the user turn for "queued" and a fresh placeholder.
+	last := m.messages[len(m.messages)-1]
+	if last.role != "assistant" || !last.streaming || !last.awaitingDelta {
+		t.Errorf("queued message should have appended a fresh placeholder, got %+v", last)
+	}
+}
+
+// TestHandleEvent_FinalRefreshesDuringRoutineAutoAdvance pins the
+// routine-specific case: under auto mode, every step's final now
+// resyncs *and* dispatches the next step. Pre-Layer-3, the refresh
+// was deferred to routine end, so a 10-step routine accumulated drift
+// across all 10 steps before the first server-canonical reconciliation.
+func TestHandleEvent_FinalRefreshesDuringRoutineAutoAdvance(t *testing.T) {
+	m := newTestChatModel()
+	m.sending = true
+	m.activeRoutine = &activeRoutine{
+		routine: routines.Routine{
+			Name:  "demo",
+			Steps: []string{"step 1", "step 2", "step 3"},
+		},
+		mode: routines.ModeAuto,
+		sent: 1,
+	}
+	m.messages = []chatMessage{
+		{role: "user", content: "step 1", gen: 1},
+		{role: "assistant", content: "ok", streaming: true, gen: 1},
+	}
+
+	finalMsg := json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"ok"}]}`)
+	cmd := m.handleEvent(makeChatEvent("final", "run1", 1, finalMsg))
+	if cmd == nil {
+		t.Fatal("expected a non-nil batch cmd")
+	}
+	if !batchProducesMsg(cmd, func(msg tea.Msg) bool {
+		_, ok := msg.(historyRefreshMsg)
+		return ok
+	}) {
+		t.Error("Layer 3: refresh must fire on every routine step's final, not just the last one")
+	}
+	// And the routine has advanced — step 2 was dispatched.
+	if m.activeRoutine == nil {
+		t.Fatal("active routine vanished")
+	}
+	if m.activeRoutine.sent != 2 {
+		t.Errorf("activeRoutine.sent = %d, want 2 (auto-advance must still fire)", m.activeRoutine.sent)
+	}
+}
+
+// batchProducesMsg walks a tea.Cmd (and any nested tea.BatchMsg) and
+// returns true when at least one leaf cmd produces a message
+// satisfying pred. Used to assert "this batch contains a refresh"
+// without caring about ordering or sibling cmds.
+func batchProducesMsg(cmd tea.Cmd, pred func(tea.Msg) bool) bool {
+	if cmd == nil {
+		return false
+	}
+	msg := cmd()
+	if msg == nil {
+		return false
+	}
+	if pred(msg) {
+		return true
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, sub := range batch {
+			if batchProducesMsg(sub, pred) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TestHandleEvent_FinalEmptyAckDoesNotBumpGen is the negative case:

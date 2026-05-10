@@ -300,7 +300,6 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		// advanced routine step, recovery system rows) get the new gen
 		// and survive the merge.
 		boundary := m.bumpGen()
-		_ = boundary // wired up by Layer 3; Layer 2 keeps the old gating.
 		// Routine bookkeeping: log assistant content, parse /routine: directives.
 		// Done before drainQueue so a directive (stop/pause/mode) is honoured
 		// before the next routine step would otherwise auto-fire.
@@ -314,20 +313,33 @@ func (m *chatModel) handleEvent(ev protocol.Event) tea.Cmd {
 		if m.shouldRingBell() {
 			cmds = append(cmds, bellCmd())
 		}
-		drainCmd := m.drainQueue()
-		if m.sending {
-			// Still draining the queue — defer history refresh until the queue is empty
-			// to avoid replacing m.messages while queued user messages are visible.
-			cmds = append(cmds, drainCmd)
-			return tea.Batch(cmds...)
-		}
-		// User queue empty — try advancing the active routine. The advance itself
-		// sets m.sending and dispatches the next step.
-		if cmd := m.maybeAdvanceRoutine(); cmd != nil {
-			cmds = append(cmds, cmd)
-			return tea.Batch(cmds...)
-		}
+		// Always resync canonical history. Layer 2's merge in the
+		// historyRefreshMsg handler keeps the live tail (anything
+		// appended below at gen > boundary) intact, so this is safe
+		// even when a routine is auto-advancing or a queued message
+		// is about to be dispatched. Without this unconditional
+		// resync, mid-routine drift would accumulate over many steps
+		// and could let a stale chat event slip through the gate that
+		// guards spurious step submission.
 		cmds = append(cmds, m.refreshHistoryAt(boundary), m.loadStats())
+		// drainQueueSkipRefresh because we have already queued the
+		// resync above; the queue-empty branch of the regular
+		// drainQueue would otherwise issue a redundant refresh with
+		// the same boundary.
+		if cmd := m.drainQueueSkipRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		// If the queue was empty, drainQueueSkipRefresh has set
+		// m.sending=false and returned nil. The routine controller
+		// can advance now; it sets m.sending=true and dispatches the
+		// next step. Tagged with the new gen, that step's appended
+		// rows are on the live side of the boundary the refresh is
+		// carrying — the merge will preserve them.
+		if !m.sending {
+			if cmd := m.maybeAdvanceRoutine(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 		return tea.Batch(cmds...)
 
 	case "error":
