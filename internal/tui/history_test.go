@@ -238,6 +238,66 @@ func TestStripLocalAgentSkillBlocks(t *testing.T) {
 	}
 }
 
+func TestStripInternalContextBlocks(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "no envelope",
+			in:   "just plain text",
+			want: "just plain text",
+		},
+		{
+			name: "block then user text",
+			in: "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\n" +
+				"injected gateway context\n" +
+				"<<<END_OPENCLAW_INTERNAL_CONTEXT>>>\n" +
+				"what's the weather?",
+			want: "what's the weather?",
+		},
+		{
+			name: "user text then block",
+			in: "do the thing\n" +
+				"<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>ctx<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+			want: "do the thing",
+		},
+		{
+			name: "only the envelope",
+			in: "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\n" +
+				"nothing but plumbing\n" +
+				"<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+			want: "",
+		},
+		{
+			name: "two blocks around text",
+			in: "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>a<<<END_OPENCLAW_INTERNAL_CONTEXT>>>" +
+				"real message" +
+				"<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>b<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+			want: "real message",
+		},
+		{
+			name: "unterminated block strips to end",
+			in: "hello\n<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\n" +
+				"truncated context with no end marker",
+			want: "hello",
+		},
+		{
+			name: "empty input",
+			in:   "",
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripInternalContextBlocks(tt.in); got != tt.want {
+				t.Errorf("stripInternalContextBlocks() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsSystemLine(t *testing.T) {
 	tests := []struct {
 		line string
