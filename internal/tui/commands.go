@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lucinate-ai/lucinate/internal/backend"
+	"github.com/lucinate-ai/lucinate/internal/config"
 	"github.com/lucinate-ai/lucinate/internal/routines"
 )
 
@@ -51,7 +52,7 @@ type pendingNavConfirm struct {
 // hint surfaces the picker first, "/model" before "/models" likewise.
 // Tab now extends to the longest common prefix and the completion menu
 // shows every candidate, so the curated order no longer rules Tab.
-var slashCommands = []string{"/agents", "/agent", "/cancel", "/clear", "/commands", "/compact", "/config", "/connections", "/crons", "/exit", "/export", "/help", "/model", "/models", "/quit", "/record", "/reset", "/routines", "/routine", "/sessions", "/skills", "/stats", "/status", "/think"}
+var slashCommands = []string{"/agents", "/agent", "/cancel", "/clear", "/commands", "/compact", "/config", "/connections", "/crons", "/exit", "/export", "/help", "/header", "/model", "/models", "/quit", "/record", "/reset", "/routines", "/routine", "/sessions", "/skills", "/stats", "/status", "/think"}
 
 // thinkingLevels is the ordered list of valid thinking levels.
 var thinkingLevels = []string{"off", "minimal", "low", "medium", "high"}
@@ -293,7 +294,7 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 			}
 		})
 	case "/help", "/commands":
-		helpText := "/quit, /exit — quit lucinate\n/agents — return to agent picker\n/agent <name> — switch agent directly\n/cancel — cancel the current response (also: Esc)\n/clear — clear chat display\n/compact — compact session context\n/config — open preferences\n/connections — switch gateway connection\n/crons — list and manage cron jobs (use /crons all for global)\n/export — write the current session's canonical history to a transcript file (/export routine opens the routine form prefilled with the user prompts)\n/models — open model picker (filter as you type)\n/model <name> — switch model directly\n/record on|off — toggle live transcript capture for this session (bare /record shows state)\n/reset — delete session and start fresh\n/sessions — browse and restore previous sessions\n/stats — show session statistics\n/status — show gateway health and agent status\n/skills — list available agent skills\n/think — show current thinking level\n/think <level> — set thinking level (off/minimal/low/medium/high)\n/help — show this help\n\n!<command> — run command locally\n!!<command> — run command on gateway host"
+		helpText := "/quit, /exit — quit lucinate\n/agents — return to agent picker\n/agent <name> — switch agent directly\n/cancel — cancel the current response (also: Esc)\n/clear — clear chat display\n/compact — compact session context\n/config — open preferences\n/connections — switch gateway connection\n/crons — list and manage cron jobs (use /crons all for global)\n/export — write the current session's canonical history to a transcript file (/export routine opens the routine form prefilled with the user prompts)\n/header — show current chat header colour\n/header <hex> — set chat header background to a hex colour (e.g. #112233 or #F0C)\n/header reset — restore the default header colour\n/models — open model picker (filter as you type)\n/model <name> — switch model directly\n/record on|off — toggle live transcript capture for this session (bare /record shows state)\n/reset — delete session and start fresh\n/sessions — browse and restore previous sessions\n/stats — show session statistics\n/status — show gateway health and agent status\n/skills — list available agent skills\n/think — show current thinking level\n/think <level> — set thinking level (off/minimal/low/medium/high)\n/help — show this help\n\n!<command> — run command locally\n!!<command> — run command on gateway host"
 		if len(m.skills) > 0 {
 			helpText += fmt.Sprintf("\n\n%d agent skill(s) available — type /skills to list", len(m.skills))
 		}
@@ -377,6 +378,12 @@ func (m *chatModel) handleSlashCommand(text string) (handled bool, cmd tea.Cmd) 
 	// /record reports state; /record on|off flips it.
 	if command == "/record" || strings.HasPrefix(command, "/record ") {
 		return m.handleRecordCommand(text)
+	}
+
+	// /header sets the chat header background colour. Bare /header
+	// reports state; /header <hex> sets it; /header reset clears it.
+	if command == "/header" || strings.HasPrefix(command, "/header ") {
+		return m.handleHeaderCommand(text)
 	}
 
 	// /export dumps the current canonical history to a transcript file
@@ -859,6 +866,64 @@ func (m *chatModel) handleRecordCommand(text string) (bool, tea.Cmd) {
 		m.updateViewport()
 		return true, nil
 	}
+}
+
+// handleHeaderCommand handles `/header`, `/header <hex>`, and
+// `/header reset`. The colour is stored in preferences and persists
+// across runs. A bare `/header` reports the current value.
+func (m *chatModel) handleHeaderCommand(text string) (bool, tea.Cmd) {
+	parts := strings.SplitN(strings.TrimSpace(text), " ", 2)
+	arg := ""
+	if len(parts) == 2 {
+		arg = strings.TrimSpace(parts[1])
+	}
+	agentID := m.agentID
+	agentLabel := m.agentName
+	if agentLabel == "" {
+		agentLabel = agentID
+	}
+	if agentID == "" {
+		m.appendMessage(chatMessage{role: "system", errMsg: "/header: no active agent — colour overrides are scoped per agent"})
+		m.updateViewport()
+		return true, nil
+	}
+	if arg == "" {
+		current := m.prefs.HeaderColorFor(agentID)
+		if current == "" {
+			m.appendMessage(chatMessage{role: "system", content: fmt.Sprintf("Header colour for %s: default. Use /header <hex> (e.g. /header #4FC3F7) to customise.", agentLabel)})
+		} else {
+			m.appendMessage(chatMessage{role: "system", content: fmt.Sprintf("Header colour for %s: %s. Use /header reset to restore the default.", agentLabel, current)})
+		}
+		m.updateViewport()
+		return true, nil
+	}
+
+	prefs := m.prefs
+	newColor := ""
+	if !(strings.EqualFold(arg, "reset") || strings.EqualFold(arg, "default") || strings.EqualFold(arg, "off")) {
+		hex, err := config.NormalizeHexColor(arg)
+		if err != nil {
+			m.appendMessage(chatMessage{role: "system", errMsg: fmt.Sprintf("/header: %v — expected a hex colour like #4FC3F7 or #F0C", err)})
+			m.updateViewport()
+			return true, nil
+		}
+		newColor = hex
+	}
+	prefs.SetHeaderColor(agentID, newColor)
+
+	if err := config.SavePreferences(prefs); err != nil {
+		m.appendMessage(chatMessage{role: "system", errMsg: fmt.Sprintf("/header: could not save preference: %v", err)})
+		m.updateViewport()
+		return true, nil
+	}
+	m.prefs = prefs
+	if newColor == "" {
+		m.appendMessage(chatMessage{role: "system", content: fmt.Sprintf("Header colour for %s restored to default.", agentLabel)})
+	} else {
+		m.appendMessage(chatMessage{role: "system", content: fmt.Sprintf("Header colour for %s set to %s.", agentLabel, newColor)})
+	}
+	m.updateViewport()
+	return true, func() tea.Msg { return prefsUpdatedMsg{prefs: prefs} }
 }
 
 // handleExportCommand handles `/export`, `/export all`, `/export routine`.
