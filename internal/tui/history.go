@@ -88,6 +88,7 @@ func fetchHistory(b backend.Backend, sessionKey string, renderer *glamour.TermRe
 			continue
 		}
 		if role == "user" {
+			text = stripInternalContextBlocks(text)
 			text = stripLocalAgentSkillBlocks(text)
 			text = stripSystemLines(text)
 			if text == "" {
@@ -196,6 +197,42 @@ func stripSystemLines(s string) string {
 		kept = append(kept, line)
 	}
 	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+// internalContextBegin / internalContextEnd delimit the gateway-injected
+// context envelope. The gateway prepends it to the user turn it sends to
+// the model; it is plumbing, not anything the human typed, so it must not
+// surface in the rendered transcript or be offered up by the up-arrow
+// history recall.
+const (
+	internalContextBegin = "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>"
+	internalContextEnd   = "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>"
+)
+
+// stripInternalContextBlocks removes every BEGIN/END internal-context span
+// (inclusive) from a user message, returning only the human-authored
+// remainder. A BEGIN with no matching END strips to end of string — better
+// to drop a malformed envelope entirely than leak gateway plumbing into the
+// input. Handles markers that share a line with real text, not just the
+// own-line form, so a stray prefix can't slip the recall.
+func stripInternalContextBlocks(s string) string {
+	if !strings.Contains(s, internalContextBegin) {
+		return s
+	}
+	for {
+		start := strings.Index(s, internalContextBegin)
+		if start < 0 {
+			break
+		}
+		rest := s[start+len(internalContextBegin):]
+		endRel := strings.Index(rest, internalContextEnd)
+		if endRel < 0 {
+			s = s[:start]
+			break
+		}
+		s = s[:start] + rest[endRel+len(internalContextEnd):]
+	}
+	return strings.TrimSpace(s)
 }
 
 // stripLocalAgentSkillBlocks removes the <local-agent-skill> envelope so it
