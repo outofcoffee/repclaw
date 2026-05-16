@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-05-16
+### Added
+- feat(logging): add configurable slog logger (#137)
+- feat(tui): add /header command to customise chat header colour (#135)
+
 ## [1.16.2] - 2026-05-16
 ### Fixed
 - fix(tui): stop scrolling chat on up/down, add bash-style history recall (#141)
