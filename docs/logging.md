@@ -46,6 +46,3 @@ The default of `warn` means a bare `lucinate` run produces no log noise at all u
 
 Outside tests, nothing currently re-inits — `cli.Run` calls `Init` once at the top of the dispatch and the rest of the process inherits `slog.Default`.
 
-## Where the warnings used to go
-
-Two pre-existing `log.Printf("warning: ...")` calls in `internal/client/client.go` (device-token persistence and `IDENTITY.md` seeding) wrote straight to `os.Stderr` via the stdlib default logger. With the TUI mounted, that meant any failure during connect or agent creation would garble the screen. They are now `slog.Warn`, so they obey the destination rule above and stay out of the rendered frame unless `LUCINATE_LOG_FILE` says otherwise.
