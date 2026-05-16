@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -786,7 +787,7 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		return m, tea.Batch(m.loadStats(), m.loadContextUsage())
 
 	case tea.KeyPressMsg:
-		logEvent("KEY code=%d mod=%v string=%q", msg.Code, msg.Mod, msg.String())
+		slog.Debug("key", "code", msg.Code, "mod", msg.Mod, "string", msg.String())
 		switch msg.String() {
 		case "esc":
 			if m.pendingNavConfirm != nil {
@@ -1078,7 +1079,7 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 
 	case chatSentMsg:
 		if msg.err != nil {
-			logEvent("SEND_ERROR: %v", msg.err)
+			slog.Debug("send error", "err", msg.err)
 			m.removeThinkingPlaceholder()
 			m.appendMessage(chatMessage{
 				role:   "assistant",
@@ -1093,7 +1094,7 @@ func (m chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 
 	case chatAbortMsg:
 		if msg.err != nil {
-			logEvent("ABORT_ERROR: %v", msg.err)
+			slog.Debug("abort error", "err", msg.err)
 		}
 		return m, nil
 
